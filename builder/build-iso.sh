@@ -7,7 +7,7 @@ OMARCHY_MIRROR="${OMARCHY_MIRROR:-stable}"
 OMARCHY_ARCH="${OMARCHY_ARCH:-x86_64}"
 OMARCHY_KERNEL="${OMARCHY_KERNEL:-linux-omarchy}"
 # profiledef.sh reads both in the mkarchiso environment.
-export OMARCHY_ARCH OMARCHY_KERNEL OMARCHY_OEM_INSTALL
+export OMARCHY_ARCH OMARCHY_KERNEL OMARCHY_OEM_INSTALL OMARCHY_SERVER_INSTALL
 
 source /builder/node-release.sh
 source /builder/arm64-kernel-image.sh
@@ -223,6 +223,9 @@ mkdir -p "$build_cache_dir/airootfs/usr/share/omarchy-iso"
 echo "$OMARCHY_MIRROR" > "$build_cache_dir/airootfs/root/omarchy_mirror"
 echo "$OMARCHY_ISO_REF" > "$build_cache_dir/airootfs/root/omarchy_iso_ref"
 echo "$OMARCHY_ARCH" > "$build_cache_dir/airootfs/root/omarchy_arch"
+if [[ ${OMARCHY_SERVER_INSTALL:-} == "1" ]]; then
+  touch "$build_cache_dir/airootfs/usr/share/omarchy-iso/server-install"
+fi
 if [[ ${OMARCHY_OEM_INSTALL:-} == "1" ]]; then
   touch "$build_cache_dir/airootfs/usr/share/omarchy-iso/oem-install"
   sed -i 's/^TIMEOUT .*/TIMEOUT 1/' "$build_cache_dir/syslinux/archiso_sys.cfg"
@@ -435,6 +438,7 @@ else
   mkdir -p /tmp/omarchy-pkglists
   bsdtar -xf "$omarchy_pkg" -C /tmp/omarchy-pkglists usr/share/omarchy/install/omarchy-base.packages usr/share/omarchy/install/omarchy-other.packages
   base_pkg_lists=(/tmp/omarchy-pkglists/usr/share/omarchy/install/omarchy-base.packages /tmp/omarchy-pkglists/usr/share/omarchy/install/omarchy-other.packages)
+  bsdtar -xf "$omarchy_pkg" -C /tmp/omarchy-pkglists usr/share/omarchy/install/omarchy-server.packages 2>/dev/null || true
   # Extracted on its own, tolerating a miss: bsdtar exits non-zero for a member
   # it can't find, so asking for this alongside the package lists would abort the
   # build here (set -e) with a bare "Not found in archive" instead of the
@@ -486,6 +490,21 @@ if [[ $OMARCHY_ARCH == aarch64 ]]; then
   else
     hw_platform=/tmp/omarchy-pkglists/usr/bin/omarchy-hw-platform
   fi
+fi
+
+# A Server ISO's default set is the runtime's Server list, in the base list's
+# place: the image, the shipped copy and the mirror all follow it. Its
+# encrypted boot also needs dropbear, for the SSH unlock in the initramfs, and
+# tpm2-tss, for systemd-cryptsetup's TPM2 token.
+image_server_packages=()
+if [[ ${OMARCHY_SERVER_INSTALL:-} == "1" ]]; then
+  image_server_packages=(dropbear tpm2-tss)
+  server_list="$(dirname "${base_pkg_lists[0]}")/omarchy-server.packages"
+  if [[ ! -f $server_list ]]; then
+    echo "ERROR: the Omarchy runtime ships no install/omarchy-server.packages; a Server ISO needs it" >&2
+    exit 1
+  fi
+  base_pkg_lists[0]=$server_list
 fi
 
 # aarch64 takes the runtime's own default sets, as omarchy-pkg-defaults composes
@@ -633,6 +652,7 @@ mapfile -t all_packages < <(
     # The root image is pacstrapped from the pruned mirror, so its packages
     # must be in the keep-set even when nothing in the lists depends on them.
     grep -hv '^#\|^$' /builder/image.packages
+    ((${#image_server_packages[@]} == 0)) || printf '%s\n' "${image_server_packages[@]}"
     # Always include the selected Omarchy packages so the target install can
     # find the runtime and companion packages in the offline mirror.
     printf '%s\n' "$OMARCHY_RUNTIME_PACKAGE" "$OMARCHY_SETTINGS_PACKAGE" "$OMARCHY_NVIM_PACKAGE"
@@ -665,6 +685,7 @@ mapfile -t target_packages < <(
     grep -hv '^#\|^$' "${base_pkg_lists[@]}" "${platform_lists[@]}"
     grep -hv '^#\|^$' "$archinstall_packages_file"
     grep -hv '^#\|^$' /builder/image.packages
+    ((${#image_server_packages[@]} == 0)) || printf '%s\n' "${image_server_packages[@]}"
     printf '%s\n' "$OMARCHY_RUNTIME_PACKAGE" "$OMARCHY_SETTINGS_PACKAGE" "$OMARCHY_NVIM_PACKAGE"
   } | sed 's/^broadcom-wl$/broadcom-wl-dkms/' | sort -u
 )
@@ -926,6 +947,7 @@ if [[ $OMARCHY_ARCH == aarch64 ]]; then
 fi
 image_package_list() {
   {
+    ((${#image_server_packages[@]} == 0)) || printf '%s\n' "${image_server_packages[@]}"
     # The architecture's list: on aarch64 the kernel is the image's and the
     # x86_64-only packages are gone.
     grep -hv '^#\|^$' "$archinstall_packages_file" |

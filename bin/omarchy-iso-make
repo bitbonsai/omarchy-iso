@@ -51,6 +51,12 @@ while [[ $# -gt 0 ]]; do
     OMARCHY_OEM_INSTALL=1
     shift
     ;;
+  --server)
+    # Omarchy Server: the root image holds install/omarchy-server.packages
+    # and the configurator asks the Server questions.
+    OMARCHY_SERVER_INSTALL=1
+    shift
+    ;;
   --oem-config)
     # What first-boot setup shows the owner of a machine this OEM ISO
     # installs: the OEM's name, logo, tagline and colour, and an agreement to
@@ -129,7 +135,7 @@ while [[ $# -gt 0 ]]; do
     ;;
   *)
     echo "Unknown option: $1"
-    echo "Usage: $0 [--oem [--oem-config FILE] [--oem-script FILE]...] [--no-cache] [--keep-pkg-cache] [--no-boot-offer] [--debug] [--edge] [--dev|--rc] [--local-source <omarchy-checkout> <pkgs-checkout> [--rehearsal]]"
+    echo "Usage: $0 [--oem [--oem-config FILE] [--oem-script FILE]...|--server] [--no-cache] [--keep-pkg-cache] [--no-boot-offer] [--debug] [--edge] [--dev|--rc] [--local-source <omarchy-checkout> <pkgs-checkout> [--rehearsal]]"
     echo "       $0 --arch aarch64 [--edge|--rc] [--package-dir DIR] [--dev-ssh <pubkey>] [--local-source <omarchy-checkout> <pkgs-checkout>] [...]"
     exit 1
     ;;
@@ -143,6 +149,11 @@ if [[ -n $REHEARSAL ]]; then
   OMARCHY_ISO_REF=rehearsal
   OMARCHY_MIRROR=edge
   : "${OMARCHY_LOCAL_PACKAGES:=omarchy-settings omarchy}"
+fi
+
+if [[ ${OMARCHY_OEM_INSTALL:-} == "1" && ${OMARCHY_SERVER_INSTALL:-} == "1" ]]; then
+  echo "Error: --oem and --server are different ISOs; pick one" >&2
+  exit 1
 fi
 
 if [[ -n $LOCAL_OMARCHY_PATH ]]; then
@@ -267,6 +278,7 @@ DOCKER_ARGS=(
   -e "OMARCHY_ISO_REF=$OMARCHY_ISO_REF"
   -e "OMARCHY_MIRROR=$OMARCHY_MIRROR"
   -e "OMARCHY_OEM_INSTALL=${OMARCHY_OEM_INSTALL:-}"
+  -e "OMARCHY_SERVER_INSTALL=${OMARCHY_SERVER_INSTALL:-}"
   -e "OMARCHY_INSTALL_DEBUG=${OMARCHY_INSTALL_DEBUG:-}"
   -e "OMARCHY_ARCH=$OMARCHY_ARCH"
   -e "OMARCHY_KERNEL=$OMARCHY_KERNEL"
@@ -340,6 +352,7 @@ fi
 
 iso_name=omarchy
 [[ ${OMARCHY_OEM_INSTALL:-} == "1" ]] && iso_name=omarchy-oem
+[[ ${OMARCHY_SERVER_INSTALL:-} == "1" ]] && iso_name=omarchy-server
 latest_iso=$(\ls -t "$BUILD_RELEASE_PATH"/"$iso_name"-*.iso | head -n1)
 if [[ $OMARCHY_ARCH == aarch64 ]]; then
   iso_ref="${latest_iso%.*}${N1X_DEV_SSH_KEY:+-devssh}-$OMARCHY_ISO_REF.iso"
