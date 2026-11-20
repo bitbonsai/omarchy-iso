@@ -1,0 +1,42 @@
+#!/usr/bin/ash
+#
+# A netboot image (bin/omarchy-iso-netboot) is the ISO's kernel and initramfs
+# with the install media appended to the initramfs under /omarchy-netboot:
+# airootfs.sfs, the root image and its checksums, as they sit on the ISO. Booted
+# with kexec there is no device to find them on, so this hook hands them to the
+# archiso hook as if they were the mounted medium. It must run after archiso.
+#
+# The launcher (omarchy-server-launcher) appends /omarchy-launch, which must
+# outlive the switch to the live root, mode 700.
+
+run_hook() {
+    if [ -d /omarchy-launch ]; then
+        mkdir -p /run
+        mv /omarchy-launch /run/omarchy-launch
+        chmod 700 /run/omarchy-launch
+    fi
+    if [ -d /omarchy-netboot ]; then
+        export copytoram="n"
+        export mount_handler="omarchy_netboot_mount_handler"
+    fi
+}
+
+# switch_root empties the initramfs, so the files move to a tmpfs that moves
+# with /run. One at a time, so the memory each leaves behind is freed before
+# the next is copied.
+omarchy_netboot_mount_handler() {
+    local src=/omarchy-netboot dst=/run/archiso/bootmnt file
+
+    msg ":: Moving the netboot media to $dst"
+    mount --mkdir -t tmpfs -o x-initrd.mount,mode=0755 bootmnt "$dst"
+    (cd "$src" && find . -type d) | while read -r file; do mkdir -p "$dst/$file"; done
+    (cd "$src" && find . -type f) | while read -r file; do
+        if ! mv "$src/$file" "$dst/$file"; then
+            echo "ERROR: could not move $file from the netboot image"
+            launch_interactive_shell
+        fi
+    done
+    mount -o remount,ro "$dst"
+
+    archiso_mount_handler "$1"
+}

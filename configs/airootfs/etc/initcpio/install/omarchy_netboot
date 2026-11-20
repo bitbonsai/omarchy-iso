@@ -1,0 +1,13 @@
+#!/bin/bash
+
+build() {
+    add_runscript
+    add_binary find
+}
+
+help() {
+    cat <<HELPEOF
+Boots the live system from install media appended to the initramfs under
+/omarchy-netboot (bin/omarchy-iso-netboot), for a kexec boot with no medium.
+HELPEOF
+}

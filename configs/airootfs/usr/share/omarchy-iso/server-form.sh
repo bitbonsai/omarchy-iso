@@ -237,6 +237,48 @@ server_ssh_handoff() {
   done
 }
 
+# The answers of an unattended install (omarchy-install-unattended), checked
+# by the same rules as the prompts: OMARCHY_SERVER_HOSTNAME, _USERNAME, _KEYS
+# (public keys, one per line), _DISK (a /dev path) and _ENCRYPT (yes or no),
+# with the passphrase on stdin when encrypting. English, a US keyboard, UTC.
+server_answers_from_env() {
+  local key label
+  language=en
+  keyboard=us
+  keyboard_input_method=none
+  keyboard_xkb_layout=""
+  timezone=UTC
+  hostname=${OMARCHY_SERVER_HOSTNAME:-}
+  username=${OMARCHY_SERVER_USERNAME:-}
+  disk=${OMARCHY_SERVER_DISK:-}
+
+  [[ $hostname =~ $OMARCHY_HOSTNAME_PATTERN ]] || abort "Not a hostname: '$hostname'"
+  [[ $username =~ $OMARCHY_USERNAME_PATTERN && ! $username =~ $OMARCHY_RESERVED_USERNAMES ]] ||
+    abort "Not a username this server can have: '$username'"
+  [[ -b $disk ]] || abort "Not a disk: '$disk'"
+
+  server_keys=""
+  while IFS= read -r key; do
+    [[ -n $key ]] || continue
+    label=$(server_key_label "$key") || abort "Not an SSH public key: $key"
+    server_keys+="$key"$'\n'
+  done <<<"${OMARCHY_SERVER_KEYS:-}"
+  [[ -n $server_keys ]] || abort "$(t server.keysRequired)"
+
+  case ${OMARCHY_SERVER_ENCRYPT:-} in
+    yes)
+      encrypt_installation=true
+      IFS= read -r password || true
+      [[ -n $password ]] || abort "$(t server.passphraseBlank)"
+      ;;
+    no)
+      encrypt_installation=false
+      password=""
+      ;;
+    *) abort "OMARCHY_SERVER_ENCRYPT must be yes or no" ;;
+  esac
+}
+
 # What the installer reads besides the configuration: the encryption choice,
 # the owner (passwordless, sudo on) and the keys for the owner's
 # authorized_keys. "*" matches no password, so nobody logs in with one, while

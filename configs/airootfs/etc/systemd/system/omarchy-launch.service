@@ -1,0 +1,12 @@
+[Unit]
+Description=Omarchy Server launcher: SSH host key and access
+ConditionPathIsDirectory=/run/omarchy-launch
+Before=sshd.service sshdgenkeys.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/omarchy-launch-start
+
+[Install]
+WantedBy=multi-user.target

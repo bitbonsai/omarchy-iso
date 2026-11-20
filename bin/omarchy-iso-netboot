@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+#
+# omarchy-iso-netboot <omarchy-server.iso> <dir>: a Server ISO as an image that
+# kexec boots with no medium, for omarchy-server-launcher (its CONTRACT.md):
+#
+#   vmlinuz     the ISO's live kernel
+#   initrd.img  the ISO's initramfs with the install media appended under
+#               /omarchy-netboot: airootfs.sfs, the root image and their
+#               checksums. The omarchy_netboot hook hands them to archiso.
+#   arch        x86_64 or aarch64
+#   cmdline     the kernel arguments the ISO boots with, less the medium's
+#
+# The whole image sits in RAM while it boots, twice for the moment a file
+# moves, so the machine needs about twice initrd.img's size free.
+
+set -euo pipefail
+
+if (( $# != 2 )); then
+  echo "Usage: $0 <omarchy-server.iso> <output-dir>" >&2
+  exit 1
+fi
+iso=$1 out=$2
+[[ -f $iso ]] || { echo "Error: $iso not found" >&2; exit 1; }
+for tool in bsdtar cpio zstd; do
+  command -v "$tool" >/dev/null || { echo "Error: $tool is needed" >&2; exit 1; }
+done
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+bsdtar -xf "$iso" -C "$work" arch
+[[ -d $work/arch/x86_64 ]] && arch=x86_64
+[[ -d $work/arch/aarch64 ]] && arch=aarch64
+[[ -n ${arch:-} ]] || { echo "Error: $iso has no arch/x86_64 or arch/aarch64" >&2; exit 1; }
+kernel=$work/arch/boot/$arch/vmlinuz-linux-omarchy
+initramfs=$work/arch/boot/$arch/initramfs-linux-omarchy.img
+[[ -f $kernel && -f $initramfs ]] || { echo "Error: $iso has no linux-omarchy kernel and initramfs for $arch" >&2; exit 1; }
+[[ -f $work/arch/$arch/airootfs.sfs || -f $work/arch/$arch/airootfs.erofs ]] ||
+  { echo "Error: $iso has no airootfs for $arch" >&2; exit 1; }
+[[ -f $work/arch/$arch/omarchy-root.img.zst ]] || { echo "Error: $iso has no root image" >&2; exit 1; }
+
+# The medium's tree as archiso expects it under its mount point.
+media=$work/omarchy-netboot
+mkdir -p "$media/arch"
+mv "$work/arch/$arch" "$media/arch/$arch"
+
+mkdir -p "$out"
+cp "$kernel" "$out/vmlinuz"
+{
+  cat "$initramfs"
+  (cd "$work" && find omarchy-netboot | LC_ALL=C sort | cpio --quiet -o -H newc -R 0:0) | zstd -q -T0 -3
+} >"$out/initrd.img"
+echo "$arch" >"$out/arch"
+# initramfs_options sizes the RAM filesystem the initrd unpacks into.
+echo "archisobasedir=arch copytoram=n initramfs_options=size=90% initramfs_async=0" >"$out/cmdline"
+
+echo "Netboot image in $out: initrd.img is $(du -h "$out/initrd.img" | cut -f1); boot it with about twice that in free RAM."

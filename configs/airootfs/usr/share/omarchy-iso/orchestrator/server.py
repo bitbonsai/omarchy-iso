@@ -6,6 +6,7 @@ PCR 7, where the machine has one, and SSH into the initramfs (port 2222)."""
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -117,6 +118,34 @@ def configure_server(ctx: InstallContext) -> None:
     if ctx.encrypt:
         stage_ssh_unlock(ctx)
         enroll_tpm(ctx)
+
+    # A launcher's install (omarchy-install-unattended) pins the installed
+    # system's host keys and may carry the installer's Tailscale node over.
+    if keys_out := os.environ.get("OMARCHY_INSTALL_HOST_KEYS_OUT"):
+        export_host_keys(target, Path(keys_out))
+    if (state := os.environ.get("OMARCHY_INSTALL_TAILSCALE_STATE_DIR")) and Path(state).is_dir():
+        carry_tailscale_state(target, Path(state))
+
+
+def export_host_keys(target: Path, keys_out: Path) -> None:
+    subprocess.run(["arch-chroot", str(target), "ssh-keygen", "-A"], check=True, capture_output=True)
+    keys_out.mkdir(parents=True, exist_ok=True)
+    published = sorted((target / "etc" / "ssh").glob("ssh_host_*_key.pub"))
+    if not published:
+        raise RuntimeError("ssh-keygen -A made no host keys on the target")
+    for key in published:
+        shutil.copy2(key, keys_out / key.name)
+    info(f"› host keys for the launcher: {', '.join(key.name for key in published)}")
+
+
+def carry_tailscale_state(target: Path, state: Path) -> None:
+    """The node the installer joined as becomes the installed server."""
+    dest = target / "var" / "lib" / "tailscale"
+    dest.mkdir(parents=True, exist_ok=True)
+    dest.chmod(0o700)
+    shutil.copytree(state, dest, dirs_exist_ok=True)
+    subprocess.run(["arch-chroot", str(target), "systemctl", "enable", "tailscaled.service"], check=True)
+    info("› Tailscale state carried over from the installer")
 
 
 def stage_ssh_unlock(ctx: InstallContext) -> None:

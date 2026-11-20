@@ -1312,10 +1312,16 @@ fi
 
 # Let the live VT reach its settled width before the first screen so the logo
 # isn't measured against the transient 80-column boot console.
-wait_for_stable_terminal
-i18n_console_font "$(tty 2>/dev/null)"
+# An unattended install has no terminal to wait for.
+if [[ ${1:-} != --unattended ]]; then
+  wait_for_stable_terminal
+  i18n_console_font "$(tty 2>/dev/null)"
+fi
 
-if $server; then
+if $server && [[ ${1:-} == --unattended ]]; then
+  server_answers_from_env
+  install_target="full_disk"
+elif $server; then
   # Over SSH there is no console to animate: straight to the questions.
   if [[ -z ${SSH_CONNECTION:-} ]]; then
     greeter

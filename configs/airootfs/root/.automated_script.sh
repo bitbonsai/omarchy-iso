@@ -10,6 +10,13 @@
 #   - COLUMNS/LINES so gum picks up real terminal size
 set -euo pipefail
 
+# A launcher's boot installs through omarchy-install-unattended, which the
+# launcher runs over SSH: no questions on the console or over SSH.
+if [[ -d /run/omarchy-launch ]]; then
+  echo "This machine is installing for the Omarchy Server launcher. Its log: /run/omarchy-launch/install.log"
+  exit 0
+fi
+
 # A Server ISO also runs the install for root logging in over SSH, with keys
 # omarchy-installer-ssh authorized. One session installs (the configurator
 # claims it); a login after that only points at the log.

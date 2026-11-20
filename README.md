@@ -401,7 +401,9 @@ Each `--oem-script` is a bash script the install runs once, as root, in the new 
 
 ## Server ISO
 
-`./bin/omarchy-iso-make --server` builds `omarchy-server-<date>-<architecture>.iso`, which installs Omarchy Server: no desktop, reached over SSH. Its root image holds the runtime's `install/omarchy-server.packages` in place of `omarchy-base.packages`, so the build needs a runtime that ships that list. Add `--local-source` and the architecture options as for any ISO.
+`./bin/omarchy-iso-make --server <omarchy-checkout> --edge` builds `omarchy-server-<date>-<architecture>.iso`, which installs Omarchy Server: no desktop, reached over SSH. Its root image holds the checkout's `install/omarchy-server.packages` in place of `omarchy-base.packages`.
+
+A server installs no `omarchy` package, since that package brings the desktop. It runs Omarchy from a clone of the checkout's current branch on Omarchy's dev channel, and `omarchy update` fast-forwards that clone from the branch's upstream. The ISO carries the branch and its tags as a git bundle, so the install works offline. Every package, `omarchy-settings-dev` included, comes from the channel, and nothing is built. The branch must contain the commit the channel's `omarchy-settings` was built from (an edge build names it in its version, as in `4.0.0.r8103.ge4635a4`), or that release's tag; the build stops otherwise. A branch on `quattro` carries no release tags, hence `--edge`. Push the branch, with an upstream set, before building.
 
 The configurator asks for the keyboard, timezone, hostname and username, then a GitHub username whose public keys it fetches from `github.com/<user>.keys`. A public key pasted into the same field works offline. Then come the disk, an overwrite confirm with Change disk in focus, whether to encrypt, and the passphrase. The owner gets no password: `user_credentials.json` carries `"enc_password": "*"`, the keys go to `~/.ssh/authorized_keys`, sudo needs no password and root is locked. The install writes `/etc/omarchy/edition` as `server` before the runtime's own setup runs.
 
@@ -423,6 +425,12 @@ ssh -p 2222 root@<server>
 ```
 
 The login waits for the passphrase prompt and answers it, then the boot carries on. The initramfs has a host key of its own, made at install time, since it sits on the unencrypted ESP. The installed system's key stays on the encrypted disk. The install log names the initramfs key's fingerprint.
+
+### Netboot image for kexec
+
+`./bin/omarchy-iso-netboot release/omarchy-server-*.iso <dir>` writes `vmlinuz`, `initrd.img`, `arch` and `cmdline` for a launcher that boots the installer with kexec. `initrd.img` is the ISO's initramfs with the install media appended under `/omarchy-netboot`; the `omarchy_netboot` hook moves it to a tmpfs and archiso boots from it as from a stick. The machine needs about twice `initrd.img`'s size in free RAM.
+
+A launcher appends `/omarchy-launch` to the initrd. The hook moves it to `/run/omarchy-launch`. `omarchy-launch.service` then installs its SSH host key and `authorized_keys` for root, keys only, before sshd starts, and `omarchy-launch-watchdog.service` runs its `agent watchdog`. The console then asks nothing. `omarchy-install-unattended` installs from the launcher's `DISK`, `HOSTNAME`, `USERNAME`, `AUTHORIZED_KEY` and `ENCRYPT`, with the passphrase on stdin. It copies the installed system's host public keys to `HOST_KEYS_OUT` and carries `TAILSCALE_STATE_DIR` over to `/var/lib/tailscale`.
 
 ### Unattended installs
 

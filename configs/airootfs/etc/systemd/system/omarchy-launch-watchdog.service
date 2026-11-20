@@ -1,0 +1,11 @@
+[Unit]
+Description=Omarchy Server launcher: reboot unless the erasure is confirmed in time
+ConditionPathExists=/run/omarchy-launch/agent
+After=omarchy-launch.service
+Requires=omarchy-launch.service
+
+[Service]
+ExecStart=/bin/bash /run/omarchy-launch/agent watchdog
+
+[Install]
+WantedBy=multi-user.target

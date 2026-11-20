@@ -28,6 +28,8 @@ mkdir -p "$build_cache_dir/airootfs/usr/share/omarchy-iso"
 printf '%s\n' hyprland snapper >"$build_cache_dir/airootfs/usr/share/omarchy-iso/omarchy-base.packages"
 image_arch_packages=()
 OMARCHY_RUNTIME_PACKAGE=omarchy OMARCHY_SETTINGS_PACKAGE=omarchy-settings OMARCHY_NVIM_PACKAGE=omarchy-nvim
+omarchy_packages=("$OMARCHY_RUNTIME_PACKAGE" "$OMARCHY_SETTINGS_PACKAGE" "$OMARCHY_NVIM_PACKAGE")
+image_server_packages=()
 
 mapfile -t image < <(image_package_list)
 has() { printf '%s\n' "${image[@]}" | grep -qxF "$1"; }

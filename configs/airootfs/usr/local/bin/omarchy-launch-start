@@ -1,0 +1,24 @@
+#!/bin/bash
+#
+# A launcher's boot (omarchy-server-launcher's CONTRACT.md): the omarchy_netboot
+# hook moved what the launcher appended to the initrd to /run/omarchy-launch.
+# Before sshd starts, give it the host key the launcher pinned, let in only the
+# launcher's key, as root, and only by key. The network is the live system's
+# DHCP. omarchy-launch-watchdog.service runs the launcher's watchdog.
+
+set -euo pipefail
+
+launch=/run/omarchy-launch
+for file in ssh_host_ed25519_key ssh_host_ed25519_key.pub authorized_keys agent; do
+  [[ -s $launch/$file ]] || { echo "omarchy-launch-start: $launch/$file is missing" >&2; exit 1; }
+done
+
+install -m 0600 "$launch/ssh_host_ed25519_key" /etc/ssh/ssh_host_ed25519_key
+install -m 0644 "$launch/ssh_host_ed25519_key.pub" /etc/ssh/ssh_host_ed25519_key.pub
+install -d -m 0700 /root/.ssh
+install -m 0600 "$launch/authorized_keys" /root/.ssh/authorized_keys
+
+# Sorts before archiso's own drop-in, and sshd keeps the first value it reads.
+install -d /etc/ssh/sshd_config.d
+printf '%s\n' 'HostKey /etc/ssh/ssh_host_ed25519_key' 'PermitRootLogin prohibit-password' \
+  'PasswordAuthentication no' 'KbdInteractiveAuthentication no' >/etc/ssh/sshd_config.d/00-omarchy-launch.conf
