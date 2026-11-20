@@ -1,0 +1,54 @@
+#!/bin/bash
+#
+# The live installer's own SSH door, for Omarchy Server ISOs. The live system
+# already runs sshd (archiso's releng profile enables it), and root has no
+# password, so nothing gets in until a key is authorized here.
+#
+#   omarchy-installer-ssh authorize <file>   authorize the public keys in <file>
+#                                            for root, one per line
+#   omarchy-installer-ssh status             print the addresses to reach this
+#                                            machine on, and its host key
+#
+# A key is authorized only when someone supplied it: a cidata drive's
+# authorized_keys, or the keys picked on the console after typing a GitHub
+# username. An SSH login as root runs the configurator (.automated_script.sh).
+
+set -euo pipefail
+
+root_keys=${OMARCHY_INSTALLER_SSH_ROOT:-}/root/.ssh/authorized_keys
+
+authorize() {
+  local file=$1 key valid=()
+  [[ -r $file ]] || { echo "omarchy-installer-ssh: cannot read $file" >&2; return 1; }
+  while IFS= read -r key || [[ -n $key ]]; do
+    key=${key%$'\r'}
+    [[ -z ${key//[[:space:]]/} || $key == \#* ]] && continue
+    if ssh-keygen -lf /dev/stdin <<<"$key" >/dev/null 2>&1; then
+      valid+=("$key")
+    else
+      echo "omarchy-installer-ssh: skipping a line that is not an SSH public key" >&2
+    fi
+  done <"$file"
+  ((${#valid[@]})) || { echo "omarchy-installer-ssh: no SSH public keys in $file" >&2; return 1; }
+
+  install -d -m 0700 "${root_keys%/*}"
+  printf '%s\n' "${valid[@]}" >"$root_keys"
+  chmod 0600 "$root_keys"
+  [[ -n ${OMARCHY_INSTALLER_SSH_ROOT:-} ]] || systemctl start sshd.service
+}
+
+status() {
+  local address key
+  while read -r address; do
+    printf 'address %s\n' "${address%/*}"
+  done < <(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}')
+  key=/etc/ssh/ssh_host_ed25519_key.pub
+  [[ -r $key ]] && printf 'hostkey %s\n' "$(ssh-keygen -lf "$key" | awk '{print $2}')"
+  return 0
+}
+
+case ${1:-} in
+  authorize) authorize "${2:?usage: omarchy-installer-ssh authorize <file>}" ;;
+  status) status ;;
+  *) echo "usage: omarchy-installer-ssh authorize <file> | status" >&2; exit 2 ;;
+esac

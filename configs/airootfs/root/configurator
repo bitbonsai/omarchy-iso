@@ -46,6 +46,26 @@ fi
 source "$INSTALLER_I18N"
 i18n_load en
 
+# A Server ISO (omarchy-iso-make --server) asks the Server questions instead of
+# the desktop's account and install-mode screens. OMARCHY_ISO_EDITION=server
+# makes a dry run outside the ISO take the same path.
+server=false
+if [[ -f /usr/share/omarchy-iso/server-install || ${OMARCHY_ISO_EDITION:-} == server ]]; then
+  server=true
+  SERVER_FORM="${SERVER_FORM:-/usr/share/omarchy-iso/server-form.sh}"
+  [[ -r $SERVER_FORM ]] ||
+    SERVER_FORM="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../usr/share/omarchy-iso/server-form.sh"
+  if [[ ! -r $SERVER_FORM ]]; then
+    echo "ERROR: Server questions not found at $SERVER_FORM" >&2
+    exit 1
+  fi
+  source "$SERVER_FORM"
+fi
+
+# The logo is green on the desktop and amber (palette 3) on Server.
+LOGO_COLOR=2
+$server && LOGO_COLOR=3
+
 LOGO_WIDTH=$(awk '{ if (length > max) max = length } END { print max+0 }' "$LOGO_PATH")
 
 export GUM_CONFIRM_PROMPT_FOREGROUND="6"
@@ -103,7 +123,7 @@ wait_for_stable_terminal() {
 clear_logo() {
   measure_terminal
   printf "\033[H\033[2J"
-  gum style --foreground 2 --padding "1 0 0 $PADDING_LEFT" "$(<"$LOGO_PATH")"
+  gum style --foreground "$LOGO_COLOR" --padding "1 0 0 $PADDING_LEFT" "$(<"$LOGO_PATH")"
 }
 
 # Vertically-centered welcome shown once before the keyboard step — the same
@@ -131,15 +151,23 @@ greeter() {
   printf '\033[?25l\033[H\033[2J'
 
   printf '\033[%d;1H' "$logo_row"
-  gum style --foreground 2 --padding "0 0 0 $PADDING_LEFT" "$(<"$LOGO_PATH")"
+  gum style --foreground "$LOGO_COLOR" --padding "0 0 0 $PADDING_LEFT" "$(<"$LOGO_PATH")"
 
   tagline="Beautiful, Fun & Agentic Linux by DHH"
+  $server && tagline="$(t server.tagline)"
   tpad=$(((cols - ${#tagline}) / 2)); (( tpad < 0 )) && tpad=0
   printf '\033[%d;%dH%s' "$tagline_row" "$((tpad + 1))" "$tagline"
 
   hint="Press Return to Start Install"
+  $server && hint="$(t server.startHint)"
   hpad=$(((cols - ${#hint}) / 2)); (( hpad < 0 )) && hpad=0
   printf '\033[%d;%dH\033[2m%s\033[0m' "$hint_row" "$((hpad + 1))" "$hint"
+
+  # Keys from a cidata drive already opened the live SSH door: say where it is.
+  if $server && [[ -s $server_installer_keys ]]; then
+    printf '\033[%d;1H' "$((hint_row + 2))"
+    server_ssh_lines
+  fi
 
   # ColorShift the logo: a green base (indexed color 2) with a cyan accent (6)
   # drifting through, settling on green. Indexed ANSI colors, not hex — the
@@ -167,14 +195,24 @@ greeter() {
     --reuse-canvas \
     --xterm-colors \
     colorshift \
-    --gradient-stops 2 10 6 10 \
+    --gradient-stops "$LOGO_COLOR" "$((LOGO_COLOR + 8))" 6 "$((LOGO_COLOR + 8))" \
     --gradient-frames 3 \
     --cycles 1000 \
-    --final-gradient-stops 2 \
+    --final-gradient-stops "$LOGO_COLOR" \
     </dev/null >/dev/tty 2>/dev/null &
   anim=$!
 
-  IFS= read -r _ </dev/tty || true
+  # Server: Return installs here, S finishes the install over SSH.
+  greeter_choice=here
+  if $server; then
+    local key
+    while IFS= read -rsn1 key </dev/tty; do
+      [[ -z $key ]] && break
+      [[ $key == [sS] ]] && { greeter_choice=ssh; break; }
+    done
+  else
+    IFS= read -r _ </dev/tty || true
+  fi
   # Tolerate ttfx's kill signal in `wait` so a future `set -e` here can't abort.
   kill "$anim" 2>/dev/null
   wait "$anim" 2>/dev/null || true
@@ -270,13 +308,14 @@ language_form() {
       clear_logo
       echo
       say "$(t keyboard.intro)"
-      say --foreground 8 "$(t keyboard.anotherOwner)"
+      # A server is set up by whoever installs it: no hand-over to another owner.
+      $server || say --foreground 8 "$(t keyboard.anotherOwner)"
       echo
       choice=$(language_rows | gum choose --height 10 --label-delimiter $'\t' \
         --selected "$(language_label "$language")" --header "$(t language.header)") && status=0 || status=$?
       ((status == 0)) && [[ -n $choice ]] && break
 
-      if ((status == OMARCHY_FORM_SIGNAL)) && confirm_prepare_for_another_owner; then
+      if ((status == OMARCHY_FORM_SIGNAL)) && ! $server && confirm_prepare_for_another_owner; then
         defer_provisioning=true
         return 0
       fi
@@ -625,6 +664,11 @@ disk_abort_hook() {
 # Deferred-provisioning installs defer the user to first boot: no credentials, and on encrypted
 # targets the orchestrator generates a throwaway LUKS passphrase itself.
 write_user_files() {
+  if $server; then
+    server_write_user_files
+    return
+  fi
+
   printf '%s\n' "$encrypt_installation" >user_encrypt_installation.txt
 
   if $defer_provisioning; then
@@ -673,7 +717,12 @@ print_dry_run_files() {
   echo -e "\n\nDisk Encryption:"
   cat user_encrypt_installation.txt
 
-  rm -f user_configuration.json user_credentials.json user_encrypt_installation.txt
+  if [[ -f authorized_keys ]]; then
+    echo -e "\n\nAuthorized Keys:"
+    cat authorized_keys
+  fi
+
+  rm -f user_configuration.json user_credentials.json user_encrypt_installation.txt authorized_keys
 }
 
 # Shared error screen for every "can't fit Omarchy here" outcome of the
@@ -996,7 +1045,7 @@ run_partition_execute() {
     "app_config": null,
     "archinstall-language": "English",
     "auth_config": {},
-    "audio_config": { "audio": "pipewire" },
+    "audio_config": $audio_config_json,
     "bootloader_config": { "bootloader": "Limine", "uki": false, "removable": false },
     "custom_commands": [],
     "omarchy_install": {
@@ -1245,6 +1294,11 @@ select_installation() {
 
 # STEP 1: KEYBOARD (Ctrl+C here arms deferred provisioning and jumps to disk selection)
 
+# PipeWire for the desktop. A server's image carries no audio stack, and
+# archinstall would install one for this setting.
+audio_config_json='{ "audio": "pipewire" }'
+$server && audio_config_json=null
+
 defer_provisioning=false
 install_target="full_disk"
 oem_install=false
@@ -1259,21 +1313,40 @@ fi
 wait_for_stable_terminal
 i18n_console_font "$(tty 2>/dev/null)"
 
-if ! $oem_install; then
+if $server; then
+  # Over SSH there is no console to animate: straight to the questions.
+  if [[ -z ${SSH_CONNECTION:-} ]]; then
+    greeter
+    while [[ $greeter_choice == ssh ]]; do
+      server_ssh_handoff "$@"
+      greeter
+    done
+  fi
+  language_form
+  keyboard_form
+  server_account_step
+  server_disk_step
+  install_target="full_disk"
+  server_claim_install "$@"
+elif ! $oem_install; then
   greeter
   language_form
 fi
 
-$defer_provisioning || keyboard_form
+$server || $defer_provisioning || keyboard_form
 
 # Normal install: keyboard (loaded above, so the LUKS passphrase is typed under
 # the right layout) → user → disk → install mode. The user step can unwind to
 # the language screen and arm deferral there, hence the second check.
-if ! $defer_provisioning; then
+if $server; then
+  : # Answered above.
+elif ! $defer_provisioning; then
   user_step
 fi
 
-if $defer_provisioning; then
+if $server; then
+  :
+elif $defer_provisioning; then
   # Deferred provisioning: no user setup, and the keyboard is deferred to the machine's first
   # boot. A defined default keymap so it boots before then; the owner picks
   # their real layout in the OOBE, which re-keys the console and, on encrypted
@@ -1385,7 +1458,7 @@ cat <<-_EOF_ >user_configuration.json
     "app_config": null,
     "archinstall-language": "English",
     "auth_config": {},
-    "audio_config": { "audio": "pipewire" },
+    "audio_config": $audio_config_json,
     "bootloader_config": { "bootloader": "Limine", "uki": false, "removable": false },
     "custom_commands": [],
     "omarchy_install": {

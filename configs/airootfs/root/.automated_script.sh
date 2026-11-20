@@ -10,7 +10,20 @@
 #   - COLUMNS/LINES so gum picks up real terminal size
 set -euo pipefail
 
-[[ $(tty) == /dev/tty1 ]] || exit 0
+# A Server ISO also runs the install for root logging in over SSH, with keys
+# omarchy-installer-ssh authorized. One session installs (the configurator
+# claims it); a login after that only points at the log.
+server_iso=false
+[[ -f /usr/share/omarchy-iso/server-install ]] && server_iso=true
+over_ssh=false
+if [[ $(tty) != /dev/tty1 ]]; then
+  $server_iso && [[ -n ${SSH_CONNECTION:-} ]] || exit 0
+  over_ssh=true
+  if [[ -d /run/omarchy-install.claim ]]; then
+    echo "This machine is already installing. Follow it with: tail -f /var/log/omarchy-install.log"
+    exit 0
+  fi
+fi
 
 # The N1x recovery boot entry is a diagnostic shell, never the installer: record
 # the hardware probe, show how to reach the machine, and leave tty1 at a prompt.
@@ -50,7 +63,7 @@ set_tokyo_night_colors() {
   echo -en "\033[0m"
   clear
 }
-set_tokyo_night_colors
+$over_ssh || set_tokyo_night_colors
 
 mkdir -p /var/log
 touch "$OMARCHY_INSTALL_LOG_FILE"
@@ -126,22 +139,39 @@ warm_offline_mirror() {
   done < <(du -k "$mirror"/*.pkg.tar.zst 2>/dev/null | sort -rn)
 }
 
-warm_offline_mirror &
-warm_pid=$!
-trap 'kill "$warm_pid" 2>/dev/null' EXIT
+# The console's session warms the cache; one over SSH comes later.
+warm_pid=""
+if ! $over_ssh; then
+  warm_offline_mirror &
+  warm_pid=$!
+fi
+trap '[[ -z $warm_pid ]] || kill "$warm_pid" 2>/dev/null' EXIT
 
 cd /root
+# A Server ISO opens its live SSH door to keys a cidata drive carries.
+if $server_iso && ! $over_ssh; then
+  /usr/local/bin/omarchy-cidata-load >/dev/null 2>&1 || true
+  if [[ -s /run/omarchy/installer_authorized_keys ]]; then
+    /usr/local/bin/omarchy-installer-ssh authorize /run/omarchy/installer_authorized_keys || true
+  fi
+fi
 # Autoinstall: a cidata drive carrying the configurator's own output files
 # stands in for the wizard. omarchy-cidata-load copies them into /root and
 # everything downstream runs the ordinary path against ordinary inputs.
 if [[ -f /usr/share/omarchy-iso/oem-install ]]; then
   export OMARCHY_UI_INTERACTIVE=no
   ./configurator --oem
-elif /usr/local/bin/omarchy-cidata-load; then
+elif ! $over_ssh && /usr/local/bin/omarchy-cidata-load; then
   echo "Autoinstall configuration found on cidata drive; skipping the configurator."
   export OMARCHY_UI_INTERACTIVE=no
+  # Same claim as the configurator's, so an SSH login does not start a second install.
+  $server_iso && mkdir -p /run/omarchy-install.claim
 else
-  ./configurator
+  # Exit 3: the console handed the install to an SSH session.
+  configurator_status=0
+  ./configurator || configurator_status=$?
+  ((configurator_status == 3)) && exit 0
+  ((configurator_status == 0)) || exit "$configurator_status"
 fi
 
 # Deferred-provisioning installs skip the celebration/reboot prompt and reboot on
@@ -175,4 +205,9 @@ rm -f /run/omarchy-install/state.json
     --authorized-keys-file /root/authorized_keys \
     --tailscale-authkey-file /root/tailscale_authkey \
     --defer-provisioning-file /root/defer-provisioning \
-    --oem-dir /usr/share/omarchy-iso/oem
+    --oem-dir /usr/share/omarchy-iso/oem || {
+  status=$?
+  # A failed install frees the machine for another try, from any session.
+  rm -rf /run/omarchy-install.claim
+  exit "$status"
+}

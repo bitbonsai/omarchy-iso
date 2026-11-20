@@ -48,6 +48,15 @@ for file in user_configuration.json "${optional_inputs[@]}"; do
   rm -f "$dest/$file"
 done
 
+# A Server ISO opens its live SSH door to the keys a drive carries, also when
+# the drive has no install configuration and the wizard runs over SSH.
+installer_keys=$root/run/omarchy/installer_authorized_keys
+rm -f "$installer_keys"
+if [[ -f $mnt/authorized_keys ]]; then
+  mkdir -p "${installer_keys%/*}"
+  cp "$mnt/authorized_keys" "$installer_keys"
+fi
+
 loaded=1
 if [[ -f $mnt/user_configuration.json ]] && [[ -f $mnt/user_credentials.json || -f $mnt/defer-provisioning ]]; then
   files=("$mnt"/user_configuration.json)
