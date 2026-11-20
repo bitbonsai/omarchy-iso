@@ -1,0 +1,9 @@
+#!/bin/sh
+# Runs for every SSH login to the initramfs: wait for the disk passphrase
+# prompt, answer it, and leave. The boot carries on once the passphrase is
+# right, and this session ends when the system switches to the real root.
+echo "Omarchy Server: waiting for the disk passphrase prompt"
+while ! ls /run/systemd/ask-password/ask.* >/dev/null 2>&1; do
+    sleep 1
+done
+exec systemd-tty-ask-password-agent --query

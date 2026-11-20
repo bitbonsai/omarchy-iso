@@ -1,0 +1,56 @@
+#!/bin/bash
+# mkinitcpio install hook for Omarchy Server: an SSH server in the initramfs,
+# so the owner can type the disk passphrase over the network when the TPM
+# cannot unlock the disk (no chip, or it refuses). Needs the systemd hook and
+# sd-encrypt after it; zz-omarchy-ssh-unlock.conf puts it in HOOKS.
+#
+# The installer writes the inputs to /etc/omarchy/ssh-unlock:
+#   authorized_keys            the owner's keys, the only way in
+#   dropbear_ed25519_host_key  this initramfs's own host key. It sits on the
+#                              unencrypted ESP, so it is not the system's.
+#   omarchy-unlock             what every login runs
+# and the unit to /etc/systemd/system/omarchy-ssh-unlock.service.
+
+build() {
+    local dir=/etc/omarchy/ssh-unlock
+
+    if [[ ! -s $dir/authorized_keys || ! -s $dir/dropbear_ed25519_host_key ]]; then
+        error "omarchy-ssh-unlock: $dir needs authorized_keys and dropbear_ed25519_host_key"
+        return 1
+    fi
+
+    # The network card's driver, by what the machine has.
+    add_checked_modules '/drivers/net/'
+
+    add_binary dropbear
+    add_binary ip
+    add_binary systemd-tty-ask-password-agent
+    add_binary /usr/lib/systemd/systemd-networkd
+
+    add_file "$dir/authorized_keys" /root/.ssh/authorized_keys 0600
+    add_file "$dir/dropbear_ed25519_host_key" /etc/dropbear/dropbear_ed25519_host_key 0600
+    add_file "$dir/omarchy-unlock" /usr/local/bin/omarchy-unlock 0755
+
+    printf '%s\n' '[Match]' 'Type=ether' 'Kind=!*' '' '[Network]' 'DHCP=yes' |
+        add_file - /etc/systemd/network/90-omarchy-unlock.network 0644
+
+    # networkd runs as its own user; the systemd hook's passwd has only root.
+    printf 'systemd-network:x:192:192:systemd Network Management:/:/usr/bin/nologin\n' >>"$BUILDROOT/etc/passwd"
+    printf 'systemd-network:x:192:\n' >>"$BUILDROOT/etc/group"
+
+    add_systemd_unit systemd-networkd.socket
+    add_systemd_unit systemd-networkd.service
+    add_symlink /usr/lib/systemd/system/sysinit.target.wants/systemd-networkd.service \
+        ../systemd-networkd.service
+
+    add_systemd_unit omarchy-ssh-unlock.service
+    add_symlink /etc/systemd/system/sysinit.target.wants/omarchy-ssh-unlock.service \
+        ../omarchy-ssh-unlock.service
+}
+
+help() {
+    cat <<HELPEOF
+Lets the owner of an encrypted Omarchy Server type the disk passphrase over SSH
+(port 2222, keys only) when the TPM does not unlock the disk.
+HELPEOF
+}

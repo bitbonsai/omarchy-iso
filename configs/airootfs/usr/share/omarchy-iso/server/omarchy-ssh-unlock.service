@@ -1,0 +1,13 @@
+[Unit]
+Description=SSH server for the disk passphrase (initrd)
+DefaultDependencies=no
+ConditionPathExists=/etc/initrd-release
+After=systemd-networkd.service
+Conflicts=initrd-switch-root.target
+Before=initrd-switch-root.target
+
+[Service]
+# Keys only, no forwarding, and every login runs omarchy-unlock.
+ExecStart=/usr/bin/dropbear -F -E -s -j -k -p 2222 -P /run/dropbear.pid -r /etc/dropbear/dropbear_ed25519_host_key -c /usr/local/bin/omarchy-unlock
+# Leave the interface for the installed system's own network setup.
+ExecStopPost=-/usr/bin/ip -4 addr flush scope global
