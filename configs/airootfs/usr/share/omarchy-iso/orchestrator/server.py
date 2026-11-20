@@ -43,12 +43,16 @@ def configure_server(ctx: InstallContext) -> None:
     target = ctx.target
     username = ctx.username
 
-    info(f"› passwordless sudo for {username}; root locked")
+    # The runtime's Server setup writes this rule. The owner has no password,
+    # so without it they could never sudo: write it when the runtime did not.
     sudoers = target / "etc" / "sudoers.d" / "omarchy-server-owner"
-    sudoers.parent.mkdir(parents=True, exist_ok=True)
-    sudoers.write_text(f"{username} ALL=(ALL) NOPASSWD: ALL\n")
-    sudoers.chmod(0o440)
-    subprocess.run(["arch-chroot", str(target), "visudo", "-cf", "/etc/sudoers.d/omarchy-server-owner"], check=True)
+    if not sudoers.exists():
+        info(f"› passwordless sudo for {username}")
+        sudoers.parent.mkdir(parents=True, exist_ok=True)
+        sudoers.write_text(f"{username} ALL=(ALL:ALL) NOPASSWD: ALL\n")
+        sudoers.chmod(0o440)
+        subprocess.run(["arch-chroot", str(target), "visudo", "-cf", "/etc/sudoers.d/omarchy-server-owner"], check=True)
+    info("› locking root")
     subprocess.run(["arch-chroot", str(target), "passwd", "-l", "root"], check=True, capture_output=True)
 
     if ctx.encrypt:

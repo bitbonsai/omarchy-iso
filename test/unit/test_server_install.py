@@ -109,7 +109,7 @@ class ServerPhasesTest(unittest.TestCase):
             server.configure_server(self.ctx)
 
         sudoers = self.target / "etc/sudoers.d/omarchy-server-owner"
-        self.assertEqual(sudoers.read_text(), "owner ALL=(ALL) NOPASSWD: ALL\n")
+        self.assertEqual(sudoers.read_text(), "owner ALL=(ALL:ALL) NOPASSWD: ALL\n")
         self.assertEqual(sudoers.stat().st_mode & 0o777, 0o440)
         self.assertIn(["arch-chroot", str(self.target), "passwd", "-l", "root"], self.calls)
 
@@ -139,6 +139,15 @@ class ServerPhasesTest(unittest.TestCase):
             server.configure_server(self.ctx)
         self.assertFalse(server.initramfs_has_ssh_unlock(self.target))
         self.assertTrue((self.target / "etc/sudoers.d/omarchy-server-owner").is_file())
+
+    def test_the_runtimes_sudo_rule_is_left_alone(self):
+        sudoers = self.target / "etc/sudoers.d/omarchy-server-owner"
+        sudoers.parent.mkdir(parents=True)
+        sudoers.write_text("from the runtime\n")
+        self.ctx.encrypt = False
+        with mock.patch("subprocess.run", side_effect=self.fake_run):
+            server.configure_server(self.ctx)
+        self.assertEqual(sudoers.read_text(), "from the runtime\n")
 
     def test_the_edition_is_server(self):
         server.write_edition(self.target)
