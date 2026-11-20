@@ -638,6 +638,9 @@ def arch_install_system(ctx: InstallContext) -> None:
         with _time_step("STEP.install_root_image"):
             _install_root_image(ctx)
         _apply_platform_layer(ctx)
+        if ctx.server:
+            from .server import write_edition
+            write_edition(ctx.target)
 
         if not pre_mounted and arch.is_encrypted(config):
             installer.generate_key_files()
@@ -2195,6 +2198,9 @@ def configure_hibernation(ctx: InstallContext) -> None:
     Limine UKI build still happens later in finalize_limine_boot after this
     writes the resume hook and kernel cmdline drop-in.
     """
+    if ctx.server:
+        # Hibernation is a desktop group; a server stays up.
+        return
     setup = ctx.target / "usr" / "bin" / "omarchy-hibernation-setup"
     if not setup.exists():
         _debug_log(ctx, "skipping hibernation: /usr/bin/omarchy-hibernation-setup is not installed")
@@ -2923,7 +2929,12 @@ def finalize_limine_boot(ctx: InstallContext) -> None:
     if prebuilt_uki.is_file() and provisioning_key:
         info("› the first boot unlocks with the provisioning key; "
              "building the UKI on this machine so its initramfs carries it")
-    skip_prebuilt = bool(added_modules) or bool(stale_keymap) or provisioning_key
+    # And for an encrypted Server: its initramfs carries the SSH unlock.
+    from .server import initramfs_has_ssh_unlock
+    ssh_unlock = initramfs_has_ssh_unlock(ctx.target)
+    if prebuilt_uki.is_file() and ssh_unlock:
+        info("› encrypted Server; building the UKI on this machine so its initramfs carries the SSH unlock")
+    skip_prebuilt = bool(added_modules) or bool(stale_keymap) or provisioning_key or ssh_unlock
 
     # A selected kernel other than the image's boots first, as in omarchy's own
     # kernel migration. Written before any UKI is built so the entries sort by it.
@@ -3137,6 +3148,12 @@ def _read_omarchy_mirror() -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def configure_login(ctx: InstallContext) -> None:
+    if ctx.server:
+        # No display manager: the owner arrives over SSH.
+        autologin = ctx.target / "etc" / "systemd" / "system" / "getty@tty1.service.d" / "autologin.conf"
+        autologin.unlink(missing_ok=True)
+        return
+
     sddm_dir = ctx.target / "etc" / "sddm.conf.d"
     sddm_dir.mkdir(parents=True, exist_ok=True)
     (sddm_dir / "99-omarchy-login.conf").write_text(

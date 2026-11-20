@@ -1294,13 +1294,12 @@ select_installation() {
 
 # STEP 1: KEYBOARD (Ctrl+C here arms deferred provisioning and jumps to disk selection)
 
+defer_provisioning=false
+install_target="full_disk"
 # PipeWire for the desktop. A server's image carries no audio stack, and
 # archinstall would install one for this setting.
 audio_config_json='{ "audio": "pipewire" }'
 $server && audio_config_json=null
-
-defer_provisioning=false
-install_target="full_disk"
 oem_install=false
 if [[ ${1:-} == "--oem" ]]; then
   [[ -f /usr/share/omarchy-iso/oem-install ]] || { echo "OEM install requires an OEM ISO" >&2; exit 1; }

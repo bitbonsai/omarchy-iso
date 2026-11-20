@@ -45,6 +45,8 @@ class InstallContext:
     # branding and agreement are for the owner a deferred install hands the
     # machine to, so no other install takes it.
     oem_dir: Path | None = None
+    # Installing from a Server ISO (omarchy-iso-make --server).
+    server: bool = False
 
     target: Path = Path("/mnt")
     omarchy_path: Path = Path("/usr/share/omarchy")
@@ -129,11 +131,22 @@ class InstallContext:
         arch_config_path = state_dir / "archinstall-user_configuration.json"
         arch_config_path.write_text(json.dumps(arch_configuration, indent=2) + "\n")
 
+        from .server import is_server_iso
+        server = is_server_iso()
+        authorized_keys_path = _optional_path(os.environ.get("OMARCHY_INSTALL_AUTHORIZED_KEYS_FILE"))
+        if server:
+            # Nobody gets into a server without a key: no password is set.
+            # Refuse before any disk is touched.
+            if defer_provisioning or not user_credentials.get("users"):
+                raise RuntimeError("a Server install needs its owner in user_credentials.json")
+            if authorized_keys_path is None:
+                raise RuntimeError("a Server install needs authorized_keys with the owner's SSH keys")
+
         ctx = cls(
             config_path=config_path,
             creds_path=creds_path,
             encrypt=_read_text(os.environ.get("OMARCHY_INSTALL_ENCRYPT_FILE")).lower() in ("true", "yes", "1"),
-            authorized_keys_path=_optional_path(os.environ.get("OMARCHY_INSTALL_AUTHORIZED_KEYS_FILE")),
+            authorized_keys_path=authorized_keys_path,
             tailscale_authkey_path=_optional_path(os.environ.get("OMARCHY_INSTALL_TAILSCALE_AUTHKEY_FILE")),
             user_configuration=user_configuration,
             user_credentials=user_credentials,
@@ -142,6 +155,7 @@ class InstallContext:
             defer_provisioning=defer_provisioning,
             oem_dir=_optional_path(os.environ.get("OMARCHY_INSTALL_OEM_DIR")) if defer_provisioning else None,
             state_dir=state_dir,
+            server=server,
         )
         disk_config = user_configuration.get("disk_config", {})
         target_mount = omarchy_install.get("target_mount") or disk_config.get("mountpoint")

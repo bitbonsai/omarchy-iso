@@ -19,6 +19,7 @@ SHARE = ROOT / "configs/airootfs/usr/share/omarchy-iso"
 I18N = SHARE / "i18n"
 SOURCES = (
     ROOT / "configs/airootfs/root/configurator",
+    ROOT / "configs/airootfs/usr/share/omarchy-iso/server-form.sh",
     ROOT / "configs/airootfs/usr/local/bin/omarchy-install-dashboard",
 )
 OMARCHY_CANDIDATES = (

@@ -128,6 +128,7 @@ class OemConfiguratorTest(unittest.TestCase):
         # Exercise the actual OEM control flow and full-disk JSON writer. Any
         # accidental interactive call fails, with stdin closed as on the rig.
         prelude = f'''
+server=false
 language=en
 iso_arch=x86_64
 limine_efi_binary=limine_x64.efi

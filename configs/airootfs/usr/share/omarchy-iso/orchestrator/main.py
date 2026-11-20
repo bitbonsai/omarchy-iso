@@ -48,6 +48,7 @@ def build_phases(ctx: InstallContext):
         validate_boot,
         create_factory_snapshot,
     )
+    from .server import configure_server
 
     return [
         ("Preparing live environment", prepare_live),
@@ -58,6 +59,9 @@ def build_phases(ctx: InstallContext):
         # Before finalize_limine_boot: the deferred-provisioning cryptkey drop-in and keyfile
         # must be in place for the final UKI build.
         ("Staging provisioning",          stage_provisioning_state),
+        # Before the UKI is built: an encrypted server's initramfs carries
+        # the SSH unlock, and the TPM is enrolled against its LUKS header.
+        *([("Configuring Server", configure_server)] if ctx.server else []),
         # Limine (ESP, UKI, boot entry) and the user's own setup (home,
         # theme, mise) touch disjoint parts of the target and run together;
         # OMARCHY_SERIAL_FINALIZE=1 runs them one after the other.

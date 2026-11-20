@@ -95,6 +95,17 @@ done
 grep -q '^umount ' "$TEST_LOG" || fail "full file set unmounts the drive"
 pass "full file set loads, copies everything, and unmounts"
 
+# A drive with only authorized_keys is no autoinstall drive, but a Server
+# ISO's live SSH door still opens to its keys.
+new_sandbox
+attach_drive cidata
+echo 'ssh-ed25519 AAAA jeff@host' >"$sandbox/media/authorized_keys"
+! run_load || fail "keys alone fall back to the wizard"
+[[ ! -e $sandbox/root/authorized_keys ]] || fail "keys alone are not an install's keys"
+cmp -s "$sandbox/media/authorized_keys" "$sandbox/run/omarchy/installer_authorized_keys" ||
+  fail "keys alone are handed to the installer's SSH door"
+pass "keys alone open the installer's SSH door and fall back to the wizard"
+
 # The uppercase label variant some tools produce works too.
 new_sandbox
 attach_drive CIDATA

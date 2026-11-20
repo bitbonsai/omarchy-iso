@@ -182,6 +182,7 @@ def make_ctx(target, **overrides):
         state_dir=target / "state",
         authorized_keys_path=None,
         oem_dir=None,
+        server=False,
         state={},
     )
     defaults.update(overrides)
