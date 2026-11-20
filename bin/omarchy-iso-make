@@ -52,10 +52,18 @@ while [[ $# -gt 0 ]]; do
     shift
     ;;
   --server)
-    # Omarchy Server: the root image holds install/omarchy-server.packages
-    # and the configurator asks the Server questions.
+    # Omarchy Server: the configurator asks the Server questions, the root
+    # image holds the checkout's install/omarchy-server.packages, and the
+    # installed server runs Omarchy from a clone of that checkout's current
+    # branch, on Omarchy's dev channel. Every package, omarchy-settings
+    # included, comes from the channel; none is built.
     OMARCHY_SERVER_INSTALL=1
-    shift
+    SERVER_CHECKOUT="${2:-}"
+    if [[ -z $SERVER_CHECKOUT ]]; then
+      echo "Error: --server requires an Omarchy checkout" >&2
+      exit 1
+    fi
+    shift 2
     ;;
   --oem-config)
     # What first-boot setup shows the owner of a machine this OEM ISO
@@ -135,7 +143,7 @@ while [[ $# -gt 0 ]]; do
     ;;
   *)
     echo "Unknown option: $1"
-    echo "Usage: $0 [--oem [--oem-config FILE] [--oem-script FILE]...|--server] [--no-cache] [--keep-pkg-cache] [--no-boot-offer] [--debug] [--edge] [--dev|--rc] [--local-source <omarchy-checkout> <pkgs-checkout> [--rehearsal]]"
+    echo "Usage: $0 [--oem [--oem-config FILE] [--oem-script FILE]...|--server <omarchy-checkout>] [--no-cache] [--keep-pkg-cache] [--no-boot-offer] [--debug] [--edge] [--dev|--rc] [--local-source <omarchy-checkout> <pkgs-checkout> [--rehearsal]]"
     echo "       $0 --arch aarch64 [--edge|--rc] [--package-dir DIR] [--dev-ssh <pubkey>] [--local-source <omarchy-checkout> <pkgs-checkout>] [...]"
     exit 1
     ;;
@@ -154,6 +162,25 @@ fi
 if [[ ${OMARCHY_OEM_INSTALL:-} == "1" && ${OMARCHY_SERVER_INSTALL:-} == "1" ]]; then
   echo "Error: --oem and --server are different ISOs; pick one" >&2
   exit 1
+fi
+
+if [[ ${OMARCHY_SERVER_INSTALL:-} == "1" ]]; then
+  [[ -z $LOCAL_OMARCHY_PATH ]] || { echo "Error: --server takes its checkout itself; drop --local-source" >&2; exit 1; }
+  SERVER_CHECKOUT=$(realpath "$SERVER_CHECKOUT")
+  server_branch=$(git -C "$SERVER_CHECKOUT" symbolic-ref --short -q HEAD) ||
+    { echo "Error: $SERVER_CHECKOUT is not a git checkout on a branch" >&2; exit 1; }
+  server_remote=$(git -C "$SERVER_CHECKOUT" config "branch.$server_branch.remote") &&
+    server_url=$(git -C "$SERVER_CHECKOUT" config "remote.$server_remote.url") ||
+    { echo "Error: branch $server_branch has no upstream to follow; set one with git branch -u" >&2; exit 1; }
+  [[ -z $(git -C "$SERVER_CHECKOUT" status --porcelain) ]] ||
+    { echo "Error: $SERVER_CHECKOUT has uncommitted changes; the server would not get them" >&2; exit 1; }
+  # The branch and its release tags, which the build checks against the
+  # channel's omarchy-settings.
+  SERVER_CHECKOUT_DIR=$(mktemp -d)
+  trap 'rm -rf "$SERVER_CHECKOUT_DIR"' EXIT
+  git -C "$SERVER_CHECKOUT" bundle create -q "$SERVER_CHECKOUT_DIR/omarchy.bundle" --tags "$server_branch"
+  printf 'BRANCH=%s\nURL=%s\n' "$server_branch" "$server_url" >"$SERVER_CHECKOUT_DIR/checkout.env"
+  echo "Server: Omarchy from $server_branch of $server_url ($(git -C "$SERVER_CHECKOUT" rev-parse --short HEAD))"
 fi
 
 if [[ -n $LOCAL_OMARCHY_PATH ]]; then
@@ -299,6 +326,11 @@ DOCKER_ARGS=(
   -v "$BUILD_ROOT/configs:/configs:ro"
 )
 
+if [[ ${OMARCHY_SERVER_INSTALL:-} == "1" ]]; then
+  # Mounted as the source the package lists come from, without the pkgs
+  # checkout, so nothing is built.
+  DOCKER_ARGS+=(-v "$SERVER_CHECKOUT:/omarchy-source:ro" -v "$SERVER_CHECKOUT_DIR:/server-checkout:ro")
+fi
 if [[ -n $LOCAL_OMARCHY_PATH ]]; then
   DOCKER_ARGS+=(
     -v "$LOCAL_OMARCHY_PATH:/omarchy-source:ro"

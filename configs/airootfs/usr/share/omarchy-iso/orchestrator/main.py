@@ -48,13 +48,15 @@ def build_phases(ctx: InstallContext):
         validate_boot,
         create_factory_snapshot,
     )
-    from .server import configure_server
+    from .server import configure_server, link_checkout
 
     return [
         ("Preparing live environment", prepare_live),
         ("Preparing install target",   prepare_install_target),
         ("Installing Arch + Omarchy",  arch_install_system),
         ("Configuring hibernation",    configure_hibernation),
+        # A server's Omarchy code is a checkout, which the setup below runs from.
+        *([("Linking the Omarchy checkout", link_checkout)] if ctx.server else []),
         ("Configuring system",         run_system_finalizer),
         # Before finalize_limine_boot: the deferred-provisioning cryptkey drop-in and keyfile
         # must be in place for the final UKI build.

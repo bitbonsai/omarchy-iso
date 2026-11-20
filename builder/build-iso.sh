@@ -225,6 +225,9 @@ echo "$OMARCHY_ISO_REF" > "$build_cache_dir/airootfs/root/omarchy_iso_ref"
 echo "$OMARCHY_ARCH" > "$build_cache_dir/airootfs/root/omarchy_arch"
 if [[ ${OMARCHY_SERVER_INSTALL:-} == "1" ]]; then
   touch "$build_cache_dir/airootfs/usr/share/omarchy-iso/server-install"
+  # The checkout the installed server runs Omarchy from (omarchy-iso-make).
+  install -d "$build_cache_dir/airootfs/usr/share/omarchy-iso/server/checkout"
+  cp /server-checkout/omarchy.bundle /server-checkout/checkout.env "$build_cache_dir/airootfs/usr/share/omarchy-iso/server/checkout/"
 fi
 if [[ ${OMARCHY_OEM_INSTALL:-} == "1" ]]; then
   touch "$build_cache_dir/airootfs/usr/share/omarchy-iso/oem-install"
@@ -496,8 +499,12 @@ fi
 # place: the image, the shipped copy and the mirror all follow it. Its
 # encrypted boot also needs dropbear, for the SSH unlock in the initramfs, and
 # tpm2-tss, for systemd-cryptsetup's TPM2 token.
+# A server runs the Omarchy code from its checkout, so the runtime package is
+# neither in the image nor in the mirror.
+omarchy_packages=("$OMARCHY_RUNTIME_PACKAGE" "$OMARCHY_SETTINGS_PACKAGE" "$OMARCHY_NVIM_PACKAGE")
 image_server_packages=()
 if [[ ${OMARCHY_SERVER_INSTALL:-} == "1" ]]; then
+  omarchy_packages=("$OMARCHY_SETTINGS_PACKAGE" "$OMARCHY_NVIM_PACKAGE")
   image_server_packages=(dropbear tpm2-tss)
   server_list="$(dirname "${base_pkg_lists[0]}")/omarchy-server.packages"
   if [[ ! -f $server_list ]]; then
@@ -655,7 +662,7 @@ mapfile -t all_packages < <(
     ((${#image_server_packages[@]} == 0)) || printf '%s\n' "${image_server_packages[@]}"
     # Always include the selected Omarchy packages so the target install can
     # find the runtime and companion packages in the offline mirror.
-    printf '%s\n' "$OMARCHY_RUNTIME_PACKAGE" "$OMARCHY_SETTINGS_PACKAGE" "$OMARCHY_NVIM_PACKAGE"
+    printf '%s\n' "${omarchy_packages[@]}"
   } | sort -u
 )
 
@@ -686,7 +693,7 @@ mapfile -t target_packages < <(
     grep -hv '^#\|^$' "$archinstall_packages_file"
     grep -hv '^#\|^$' /builder/image.packages
     ((${#image_server_packages[@]} == 0)) || printf '%s\n' "${image_server_packages[@]}"
-    printf '%s\n' "$OMARCHY_RUNTIME_PACKAGE" "$OMARCHY_SETTINGS_PACKAGE" "$OMARCHY_NVIM_PACKAGE"
+    printf '%s\n' "${omarchy_packages[@]}"
   } | sed 's/^broadcom-wl$/broadcom-wl-dkms/' | sort -u
 )
 
@@ -776,6 +783,31 @@ mkdir -p /tmp/offlinedb
 # names nothing offers, and warn. A builder cache that still holds the old
 # file hides the failure.
 pacman --config "$online_pacman_conf" --noconfirm -Sy --dbpath /tmp/offlinedb >/dev/null
+# A server takes omarchy-settings from the channel and the code from its
+# checkout, so the checkout's branch must contain what that omarchy-settings
+# was built from: the commit an edge build names in its version
+# (4.0.0.r8103.ge4635a4), or the tag of a release (v4.5.0). quattro carries
+# no release tags, so a branch on quattro builds with --edge. Rebase the
+# branch when the channel moves past it, and push it, before building.
+if [[ ${OMARCHY_SERVER_INSTALL:-} == "1" ]]; then
+  settings_version=$(pacman --config "$online_pacman_conf" --dbpath /tmp/offlinedb -Si "$OMARCHY_SETTINGS_PACKAGE" |
+    awk '$1 == "Version" { print $3; exit }')
+  settings_source=${settings_version#*:}
+  settings_source=${settings_source%-*}
+  if [[ $settings_source =~ \.g([0-9a-f]{7,})$ ]]; then
+    settings_source=${BASH_REMATCH[1]}
+  else
+    settings_source=v$settings_source
+  fi
+  source /server-checkout/checkout.env
+  rm -rf /tmp/server-checkout && git clone -q --branch "$BRANCH" /server-checkout/omarchy.bundle /tmp/server-checkout
+  if ! git -C /tmp/server-checkout merge-base --is-ancestor "$settings_source" HEAD 2>/dev/null; then
+    echo "ERROR: branch $BRANCH does not contain $settings_source, which the channel's $OMARCHY_SETTINGS_PACKAGE $settings_version is built from" >&2
+    exit 1
+  fi
+  echo "Server: $BRANCH contains $settings_source, matching $OMARCHY_SETTINGS_PACKAGE $settings_version"
+  rm -rf /tmp/server-checkout
+fi
 # aarch64: every Snapdragon OEM firmware package, found by the
 # qcom-firmware-<folder> name it provides. Omarchy installs a machine's
 # package by that name during the install, so the mirror carries all of them.
@@ -956,7 +988,7 @@ image_package_list() {
     ((${#image_arch_packages[@]} == 0)) || printf '%s\n' "${image_arch_packages[@]}"
     # The shipped copy, which is what the install reads too.
     grep -hv '^#\|^$' "$build_cache_dir/airootfs/usr/share/omarchy-iso/omarchy-base.packages"
-    printf '%s\n' "$OMARCHY_RUNTIME_PACKAGE" "$OMARCHY_SETTINGS_PACKAGE" "$OMARCHY_NVIM_PACKAGE"
+    printf '%s\n' "${omarchy_packages[@]}"
   } | sort -u
 }
 mapfile -t image_packages < <(image_package_list)

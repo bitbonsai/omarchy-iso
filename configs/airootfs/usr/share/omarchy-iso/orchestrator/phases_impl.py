@@ -218,9 +218,12 @@ ROOT_IMAGE_REQUIRED_PACKAGES = ("limine", "omarchy-keyring")
 
 
 def _root_image_required_packages() -> list[str]:
+    from .server import is_server_iso
+    # A server runs the Omarchy code from a checkout, not from the package.
+    runtime = [] if is_server_iso() else [_omarchy_runtime_package()]
     return [
         *ROOT_IMAGE_REQUIRED_PACKAGES,
-        _omarchy_runtime_package(),
+        *runtime,
         _omarchy_settings_package(),
         _omarchy_nvim_package(),
     ]
@@ -2399,9 +2402,11 @@ def _run_target_setup_command(ctx: InstallContext, cmd: list[str], *, user: str 
             log.write(f"[orchestrator] WARNING: failed to bind unified setup log: {exc}\n")
 
     mirror_channel = _read_omarchy_mirror()
+    from .server import target_omarchy_path
+    omarchy_path = target_omarchy_path(ctx)
     env_extras = [
-        "OMARCHY_PATH=/usr/share/omarchy",
-        "OMARCHY_INSTALL=/usr/share/omarchy/install",
+        f"OMARCHY_PATH={omarchy_path}",
+        f"OMARCHY_INSTALL={omarchy_path}/install",
         f"OMARCHY_INSTALL_USER={ctx.username}",
         f"OMARCHY_START_TIME={omarchy_start_time}",
         f"OMARCHY_START_EPOCH={omarchy_start_epoch}",
@@ -2459,11 +2464,19 @@ def _run_target_setup_command(ctx: InstallContext, cmd: list[str], *, user: str 
                 pass
 
 
+def _target_command(ctx: InstallContext, name: str) -> str:
+    """An omarchy-* command in the target: the package's in /usr/bin, or the
+    server's checkout's."""
+    from .server import target_omarchy_path
+    return f"{target_omarchy_path(ctx)}/bin/{name}" if ctx.server else f"/usr/bin/{name}"
+
+
 def run_system_finalizer(ctx: InstallContext) -> None:
+    apply_system = _target_command(ctx, "omarchy-apply-system")
     if ctx.defer_provisioning:
-        cmd = ["/usr/bin/omarchy-apply-system", "--defer-provisioning", "--first-install"]
+        cmd = [apply_system, "--defer-provisioning", "--first-install"]
     else:
-        cmd = ["/usr/bin/omarchy-apply-system", "--install-user", ctx.username, "--first-install"]
+        cmd = [apply_system, "--install-user", ctx.username, "--first-install"]
 
     # On aarch64 the runtime runs pacman-key --init and --populate on the
     # target (omarchy's install/post-install/pacman.sh). Two pacman-keys on
@@ -3083,7 +3096,7 @@ def run_chroot_finalizer(ctx: InstallContext, *, private_mounts: bool = False) -
 
     _run_target_setup_command(
         ctx,
-        ["/usr/bin/omarchy-provision-user", "--force", "--first-install"],
+        [_target_command(ctx, "omarchy-provision-user"), "--force", "--first-install"],
         user=ctx.username,
         private_mounts=private_mounts,
     )

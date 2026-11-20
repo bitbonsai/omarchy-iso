@@ -100,6 +100,7 @@ class ServerPhasesTest(unittest.TestCase):
 
         names = [name for name, _ in main.build_phases(self.ctx)]
         self.assertLess(names.index("Configuring Server"), names.index("Finalizing boot and user"))
+        self.assertLess(names.index("Linking the Omarchy checkout"), names.index("Configuring system"))
         self.ctx.server = False
         self.assertNotIn("Configuring Server", [name for name, _ in main.build_phases(self.ctx)])
 
@@ -152,6 +153,71 @@ class ServerPhasesTest(unittest.TestCase):
     def test_the_edition_is_server(self):
         server.write_edition(self.target)
         self.assertEqual((self.target / "etc/omarchy/edition").read_text(), "server\n")
+
+
+class LinkCheckoutTest(unittest.TestCase):
+    """link_checkout clones the ISO's bundle with real git; arch-chroot is
+    replaced by running the command with its paths under the target."""
+
+    def setUp(self):
+        import subprocess
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        source = root / "source"
+        git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+        subprocess.run([*git, "init", "-q", "-b", "server", str(source)], check=True)
+        (source / "bin").mkdir()
+        (source / "bin" / "omarchy-version").write_text("#!/bin/sh\n")
+        subprocess.run([*git, "-C", str(source), "add", "."], check=True)
+        subprocess.run([*git, "-C", str(source), "commit", "-qm", "init"], check=True)
+        subprocess.run([*git, "-C", str(source), "tag", "v4.5.0"], check=True)
+        files = root / "iso" / "checkout"
+        files.mkdir(parents=True)
+        subprocess.run(["git", "-C", str(source), "bundle", "create", "-q", str(files / "omarchy.bundle"),
+                        "--tags", "server"], check=True)
+        (files / "checkout.env").write_text("BRANCH=server\nURL=https://github.com/example/omarchy.git\n")
+        for name, value in (("CHECKOUT_BUNDLE", files / "omarchy.bundle"), ("CHECKOUT_ENV", files / "checkout.env")):
+            patcher = mock.patch.object(server, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+        self.target = root / "target"
+        (self.target / "var/tmp").mkdir(parents=True)
+        (self.target / "home/owner").mkdir(parents=True)
+        (self.target / "etc").mkdir()
+        self.ctx = types.SimpleNamespace(target=self.target, server=True, username="owner")
+        self.real_run = subprocess.run
+
+    def fake_run(self, cmd, **kwargs):
+        if cmd[0] != "arch-chroot":
+            return self.real_run(cmd, **kwargs)
+        if "visudo" in cmd:
+            return CompletedProcess(cmd, 0, "", "")
+        inner = cmd[4:] if cmd[1] == "-u" else cmd[2:]
+        inner = [str(self.target) + arg if arg.startswith(("/home/", "/var/tmp/")) else arg for arg in inner]
+        return self.real_run(inner, **kwargs)
+
+    def test_the_checkout_is_cloned_tracks_the_fork_and_is_linked(self):
+        import subprocess
+        with mock.patch("subprocess.run", side_effect=self.fake_run):
+            server.link_checkout(self.ctx)
+
+        checkout = self.target / "home/owner/omarchy"
+        git = lambda *args: self.real_run(["git", "-C", str(checkout), *args],
+                                          capture_output=True, text=True, check=True).stdout.strip()
+        self.assertEqual(git("rev-parse", "--abbrev-ref", "HEAD"), "server")
+        self.assertEqual(git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"), "origin/server")
+        self.assertEqual(git("remote", "get-url", "origin"), "https://github.com/example/omarchy.git")
+        self.assertEqual(git("describe", "--tags"), "v4.5.0")
+        self.assertEqual((self.target / "etc/omarchy.conf").read_text(), 'export OMARCHY_PATH="/home/owner/omarchy"\n')
+        self.assertEqual((self.target / "etc/sudoers.d/omarchy-dev-path").read_text(),
+                         'Defaults secure_path="/home/owner/omarchy/bin:/usr/local/sbin:/usr/local/bin:/usr/bin"\n')
+        self.assertFalse((self.target / "var/tmp/omarchy.bundle").exists())
+
+    def test_the_desktop_keeps_the_package_tree(self):
+        self.ctx.server = False
+        self.assertEqual(server.target_omarchy_path(self.ctx), Path("/usr/share/omarchy"))
 
 
 class UnlockHooksTest(unittest.TestCase):

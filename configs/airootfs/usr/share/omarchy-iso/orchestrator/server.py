@@ -22,6 +22,13 @@ UNLOCK_UNIT = Path("etc/systemd/system/omarchy-ssh-unlock.service")
 UNLOCK_DROPIN = Path("etc/mkinitcpio.conf.d/zz-omarchy-ssh-unlock.conf")
 TPM_VERSION = Path("/sys/class/tpm/tpm0/tpm_version_major")
 
+# The Omarchy code a server runs: a git checkout on Omarchy's dev channel, which
+# omarchy update fast-forwards. The ISO carries it as a bundle, with the branch
+# and the remote it tracks in checkout.env (omarchy-iso-make --server).
+CHECKOUT_BUNDLE = SERVER_FILES / "checkout" / "omarchy.bundle"
+CHECKOUT_ENV = SERVER_FILES / "checkout" / "checkout.env"
+SYSTEM_SECURE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/bin"
+
 
 def is_server_iso(marker: Path = SERVER_MARKER) -> bool:
     return marker.is_file()
@@ -32,6 +39,58 @@ def write_edition(target: Path) -> None:
     edition = target / "etc" / "omarchy" / "edition"
     edition.parent.mkdir(parents=True, exist_ok=True)
     edition.write_text("server\n")
+
+
+def target_omarchy_path(ctx: InstallContext) -> Path:
+    """Where the target's Omarchy code lives, as the target sees it: the
+    package's tree on the desktop, the owner's checkout on a server."""
+    if ctx.server:
+        return Path("/home") / ctx.username / "omarchy"
+    return Path("/usr/share/omarchy")
+
+
+def _checkout_env(path: Path) -> dict[str, str]:
+    values = {}
+    for line in path.read_text().splitlines():
+        key, _, value = line.partition("=")
+        if key in ("BRANCH", "URL") and value:
+            values[key] = value
+    if set(values) != {"BRANCH", "URL"}:
+        raise RuntimeError(f"{path} must name BRANCH and URL")
+    return values
+
+
+def link_checkout(ctx: InstallContext) -> None:
+    """Clone the ISO's checkout to ~/omarchy and link Omarchy to it the way
+    omarchy-dev-link does: /etc/omarchy.conf names OMARCHY_PATH, and sudo
+    resolves omarchy-* from the checkout's bin."""
+    target = ctx.target
+    username = ctx.username
+    checkout = target_omarchy_path(ctx)
+    env = _checkout_env(CHECKOUT_ENV)
+
+    info(f"› cloning the Omarchy checkout ({env['BRANCH']}, tracking {env['URL']}) to {checkout}")
+    staged = target / "var" / "tmp" / "omarchy.bundle"
+    shutil.copy2(CHECKOUT_BUNDLE, staged)
+    staged.chmod(0o644)
+    try:
+        user = ["arch-chroot", "-u", username, str(target)]
+        subprocess.run([*user, "git", "clone", "--quiet", "--branch", env["BRANCH"],
+                        "/var/tmp/omarchy.bundle", str(checkout)], check=True)
+        # origin/<branch> stays from the bundle, so the branch keeps tracking
+        # it; the next fetch, omarchy update's, goes to the fork.
+        subprocess.run([*user, "git", "-C", str(checkout), "remote", "set-url", "origin", env["URL"]], check=True)
+    finally:
+        staged.unlink(missing_ok=True)
+
+    conf = target / "etc" / "omarchy.conf"
+    conf.write_text(f'export OMARCHY_PATH="{checkout}"\n')
+    conf.chmod(0o644)
+    sudoers = target / "etc" / "sudoers.d" / "omarchy-dev-path"
+    sudoers.parent.mkdir(parents=True, exist_ok=True)
+    sudoers.write_text(f'Defaults secure_path="{checkout}/bin:{SYSTEM_SECURE_PATH}"\n')
+    sudoers.chmod(0o440)
+    subprocess.run(["arch-chroot", str(target), "visudo", "-cf", "/etc/sudoers.d/omarchy-dev-path"], check=True)
 
 
 def initramfs_has_ssh_unlock(target: Path) -> bool:

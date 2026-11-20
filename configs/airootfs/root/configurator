@@ -1098,8 +1098,7 @@ $archinstall_custom_servers
         "base-devel",
         "git",
         "omarchy-keyring",
-        "$OMARCHY_SETTINGS_PACKAGE",
-        "$OMARCHY_RUNTIME_PACKAGE"
+        $omarchy_packages_json
     ],
     "profile_config": {
         "gfx_driver": null,
@@ -1300,6 +1299,10 @@ install_target="full_disk"
 # archinstall would install one for this setting.
 audio_config_json='{ "audio": "pipewire" }'
 $server && audio_config_json=null
+# A server runs the Omarchy code from a checkout, so it installs no runtime package.
+omarchy_packages_json="\"$OMARCHY_SETTINGS_PACKAGE\",
+        \"$OMARCHY_RUNTIME_PACKAGE\""
+$server && omarchy_packages_json="\"$OMARCHY_SETTINGS_PACKAGE\""
 oem_install=false
 if [[ ${1:-} == "--oem" ]]; then
   [[ -f /usr/share/omarchy-iso/oem-install ]] || { echo "OEM install requires an OEM ISO" >&2; exit 1; }
@@ -1561,8 +1564,7 @@ $archinstall_custom_servers
         "base-devel",
         "git",
         "omarchy-keyring",
-        "$OMARCHY_SETTINGS_PACKAGE",
-        "$OMARCHY_RUNTIME_PACKAGE"
+        $omarchy_packages_json
     ],
     "profile_config": {
         "gfx_driver": null,
