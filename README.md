@@ -399,6 +399,35 @@ Each `--oem-script` is a bash script the install runs once, as root, in the new 
 
 `test/unit/fixtures/oem/` is a complete bundle.
 
+## Server ISO
+
+`./bin/omarchy-iso-make --server` builds `omarchy-server-<date>-<architecture>.iso`, which installs Omarchy Server: no desktop, reached over SSH. Its root image holds the runtime's `install/omarchy-server.packages` in place of `omarchy-base.packages`, so the build needs a runtime that ships that list. Add `--local-source` and the architecture options as for any ISO.
+
+The configurator asks for the keyboard, timezone, hostname and username, then a GitHub username whose public keys it fetches from `github.com/<user>.keys`. A public key pasted into the same field works offline. Then come the disk, an overwrite confirm with Change disk in focus, whether to encrypt, and the passphrase. The owner gets no password: `user_credentials.json` carries `"enc_password": "*"`, the keys go to `~/.ssh/authorized_keys`, sudo needs no password and root is locked. The install writes `/etc/omarchy/edition` as `server` before the runtime's own setup runs.
+
+### Finishing the install over SSH
+
+The live system runs sshd, and root has no password, so nothing gets in until a key is authorized. Two things authorize one:
+
+- A `cidata` drive with an `authorized_keys` file, also when it carries no install configuration. The console then shows `ssh root@<address>` and the live host key's fingerprint under the greeter.
+- Pressing S on the greeter, then picking keys from a GitHub username or pasting one. The console shows the address and fingerprint and waits.
+
+An SSH login as root runs the same questions. Whichever session finishes its questions first installs; the other is told the machine is taken. A failed install frees it again.
+
+### Encryption
+
+Encryption is LUKS2. Where the machine has a TPM 2.0, the install enrolls a key slot bound to PCR 7, the Secure Boot state, and the disk unlocks at boot with nothing typed. Every encrypted server also boots an SSH server in its initramfs, on port 2222 with the owner's keys only, so it unlocks over the network when there is no TPM or the TPM refuses:
+
+```bash
+ssh -p 2222 root@<server>
+```
+
+The login waits for the passphrase prompt and answers it, then the boot carries on. The initramfs has a host key of its own, made at install time, since it sits on the unencrypted ESP. The installed system's key stays on the encrypted disk. The install log names the initramfs key's fingerprint.
+
+### Unattended installs
+
+The cidata files are the same as for the desktop, and `authorized_keys` is required: a server without keys cannot be reached. `user_credentials.json` names the owner with `"enc_password": "*"` and, for an encrypted install, carries `encryption_password`. With a TPM the encrypted install is unattended from start to finish. Without one, its first boot waits on port 2222.
+
 ## Translations
 
 The configurator asks for a language first, on the screen that carries the intro and the hidden Ctrl+C entry into preparing the machine for another owner. It offers every language in Omarchy's registry (`default/i18n/locales.json` in the settings package). A language with a catalog in `configs/airootfs/usr/share/omarchy-iso/i18n/` also translates the installer. The others are listed by their English name, the installer stays in English, and the language still goes to the installed system as `/etc/omarchy/language`. The keyboard list then preselects the language's layout from `language-defaults.json`. The timezone list preselects the network's guess, and when that fails, the capital of the language's country from the same file. English, Arabic, Swahili and Tamil have no single home country, so they fall back to the plain timezone search.
