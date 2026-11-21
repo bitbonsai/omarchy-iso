@@ -9,7 +9,7 @@
 #   dropbear_ed25519_host_key  this initramfs's own host key. It sits on the
 #                              unencrypted ESP, so it is not the system's.
 #   omarchy-unlock             what every login runs
-# and the unit to /etc/systemd/system/omarchy-ssh-unlock.service.
+# and the units to /etc/systemd/system/omarchy-ssh-unlock{,-network}.service.
 
 build() {
     local dir=/etc/omarchy/ssh-unlock
@@ -46,6 +46,9 @@ build() {
     add_systemd_unit omarchy-ssh-unlock.service
     add_symlink /etc/systemd/system/sysinit.target.wants/omarchy-ssh-unlock.service \
         ../omarchy-ssh-unlock.service
+    add_systemd_unit omarchy-ssh-unlock-network.service
+    add_symlink /etc/systemd/system/sysinit.target.wants/omarchy-ssh-unlock-network.service \
+        ../omarchy-ssh-unlock-network.service
 }
 
 help() {

@@ -118,6 +118,7 @@ class ServerPhasesTest(unittest.TestCase):
         self.assertEqual((unlock / "authorized_keys").read_text(), KEY + "\n")
         self.assertTrue((self.target / "etc/initcpio/install/omarchy-ssh-unlock").is_file())
         self.assertTrue((self.target / "etc/systemd/system/omarchy-ssh-unlock.service").is_file())
+        self.assertTrue((self.target / "etc/systemd/system/omarchy-ssh-unlock-network.service").is_file())
         self.assertTrue(server.initramfs_has_ssh_unlock(self.target))
 
         enroll = next(cmd for cmd in self.calls if cmd[0] == "systemd-cryptenroll")

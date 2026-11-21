@@ -20,6 +20,7 @@ SERVER_FILES = Path("/usr/share/omarchy-iso/server")
 UNLOCK_DIR = Path("etc/omarchy/ssh-unlock")
 UNLOCK_HOOK = Path("etc/initcpio/install/omarchy-ssh-unlock")
 UNLOCK_UNIT = Path("etc/systemd/system/omarchy-ssh-unlock.service")
+UNLOCK_NETWORK_UNIT = Path("etc/systemd/system/omarchy-ssh-unlock-network.service")
 UNLOCK_DROPIN = Path("etc/mkinitcpio.conf.d/zz-omarchy-ssh-unlock.conf")
 TPM_VERSION = Path("/sys/class/tpm/tpm0/tpm_version_major")
 
@@ -165,6 +166,7 @@ def stage_ssh_unlock(ctx: InstallContext) -> None:
     shutil.copy2(files / "omarchy-unlock", unlock / "omarchy-unlock")
     for name, dest in (("omarchy-ssh-unlock.install", UNLOCK_HOOK),
                        ("omarchy-ssh-unlock.service", UNLOCK_UNIT),
+                       ("omarchy-ssh-unlock-network.service", UNLOCK_NETWORK_UNIT),
                        ("zz-omarchy-ssh-unlock.conf", UNLOCK_DROPIN)):
         (target / dest).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(files / name, target / dest)

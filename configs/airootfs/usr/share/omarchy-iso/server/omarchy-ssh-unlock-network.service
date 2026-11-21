@@ -1,0 +1,17 @@
+[Unit]
+Description=Hand the network to the installed system (initrd)
+DefaultDependencies=no
+ConditionPathExists=/etc/initrd-release
+# Stops after systemd-networkd, so nothing configures the links again.
+Before=systemd-networkd.service
+Conflicts=initrd-switch-root.target
+Before=initrd-switch-root.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/true
+# A link still up with the initramfs's DHCP address is one NetworkManager
+# takes as configured elsewhere: it never asks DHCP itself, and the address
+# goes stale. Take every link down so the installed system starts clean.
+ExecStop=/bin/sh -c 'for dev in /sys/class/net/*; do dev=$${dev##*/}; [ "$$dev" = lo ] && continue; ip addr flush dev "$$dev"; ip link set dev "$$dev" down; done'
