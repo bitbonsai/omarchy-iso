@@ -92,7 +92,12 @@ class ServerPhasesTest(unittest.TestCase):
             self.enrolled_mode = key.stat().st_mode & 0o777
             return CompletedProcess(cmd, 0, "", "")
         if "dropbearkey" in cmd:
-            return CompletedProcess(cmd, 0, "Public key...\nFingerprint: SHA256:abc\n", "")
+            return CompletedProcess(cmd, 0, "Public key portion is:\nssh-ed25519 AAAAunlock root@live\nFingerprint: SHA256:abc\n", "")
+        if "ssh-keygen" in cmd:
+            ssh = self.target / "etc/ssh"
+            ssh.mkdir(parents=True, exist_ok=True)
+            (ssh / "ssh_host_ed25519_key.pub").write_text("ssh-ed25519 AAAAsystem root@srv\n")
+            return CompletedProcess(cmd, 0, "", "")
         return CompletedProcess(cmd, 0, "", "")
 
     def test_the_phase_comes_before_the_uki_is_built_and_only_on_server(self):
@@ -127,6 +132,15 @@ class ServerPhasesTest(unittest.TestCase):
         self.assertEqual(self.enrolled_with, "hunter22")
         self.assertEqual(self.enrolled_mode, 0o600)
         self.assertFalse(list(Path(self.tmp.name).glob("tpm-enroll.key")))
+
+    def test_the_launcher_gets_the_system_and_unlock_host_keys(self):
+        keys_out = Path(self.tmp.name) / "keys-out"
+        with mock.patch("subprocess.run", side_effect=self.fake_run), \
+                mock.patch.object(server, "has_tpm2", return_value=False), \
+                mock.patch.dict(os.environ, {"OMARCHY_INSTALL_HOST_KEYS_OUT": str(keys_out)}):
+            server.configure_server(self.ctx)
+        self.assertEqual((keys_out / "ssh_host_ed25519_key.pub").read_text(), "ssh-ed25519 AAAAsystem root@srv\n")
+        self.assertEqual((keys_out / "unlock_ed25519.pub").read_text(), "ssh-ed25519 AAAAunlock root@live\n")
 
     def test_without_a_tpm_the_ssh_unlock_is_the_way_in(self):
         with mock.patch("subprocess.run", side_effect=self.fake_run), \

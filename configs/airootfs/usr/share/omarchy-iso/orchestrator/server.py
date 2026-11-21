@@ -136,6 +136,12 @@ def export_host_keys(target: Path, keys_out: Path) -> None:
         raise RuntimeError("ssh-keygen -A made no host keys on the target")
     for key in published:
         shutil.copy2(key, keys_out / key.name)
+    # The SSH unlock's own key, so the launcher can pin it and type the
+    # passphrase itself.
+    unlock = target / UNLOCK_DIR / "dropbear_ed25519_host_key.pub"
+    if unlock.is_file():
+        shutil.copy2(unlock, keys_out / "unlock_ed25519.pub")
+        published.append(keys_out / "unlock_ed25519.pub")
     info(f"› host keys for the launcher: {', '.join(key.name for key in published)}")
 
 
@@ -176,6 +182,10 @@ def stage_ssh_unlock(ctx: InstallContext) -> None:
     result = subprocess.run(["arch-chroot", str(target), "dropbearkey", "-t", "ed25519", "-f", str(host_key)],
                             check=True, capture_output=True, text=True)
     fingerprint = next((line.split()[-1] for line in result.stdout.splitlines() if line.startswith("Fingerprint:")), "")
+    public = next((line for line in result.stdout.splitlines() if line.startswith("ssh-ed25519 ")), "")
+    if not public:
+        raise RuntimeError("dropbearkey printed no public key for the SSH unlock")
+    (target / UNLOCK_DIR / "dropbear_ed25519_host_key.pub").write_text(public + "\n")
     info(f"› SSH unlock on port 2222, host key {fingerprint}")
 
 
