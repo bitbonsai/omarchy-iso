@@ -4,14 +4,16 @@
 # has confirmed erasure (omarchy-server-launcher's CONTRACT.md). Input:
 #
 #   DISK                 the disk under /dev, such as nvme0n1
-#   HOSTNAME, USERNAME   the server's name and its owner
+#   SERVER_HOSTNAME      the server's name (bash overwrites an inherited HOSTNAME)
+#   USERNAME             its owner
 #   AUTHORIZED_KEY       the owner's public key(s), one per line
 #   ENCRYPT              yes or no; with yes, the passphrase is stdin's first line
 #   HOST_KEYS_OUT        a directory for the installed system's host public keys
 #   TAILSCALE_STATE_DIR  optional: tailscaled state for the installed system
 #
 # It installs through the configurator's own answers and the orchestrator, the
-# same path as the console, and logs to /run/omarchy-launch/install.log.
+# same path as the console, and logs to /run/omarchy-launch/install.log. It
+# does not reboot: the launcher's agent does, once it has the host keys.
 
 set -euo pipefail
 
@@ -19,11 +21,7 @@ log=/run/omarchy-launch/install.log
 mkdir -p "${log%/*}"
 exec >>"$log" 2>&1
 
-# Bash replaces an inherited HOSTNAME with the machine's own name at startup,
-# so read the one the caller passed.
-server_hostname=$(tr '\0' '\n' </proc/$$/environ | sed -n 's/^HOSTNAME=//p' | head -1)
-
-for name in DISK USERNAME AUTHORIZED_KEY ENCRYPT HOST_KEYS_OUT; do
+for name in DISK SERVER_HOSTNAME USERNAME AUTHORIZED_KEY ENCRYPT HOST_KEYS_OUT; do
   [[ -n ${!name:-} ]] || { echo "omarchy-install-unattended: $name is not set" >&2; exit 2; }
 done
 [[ $DISK =~ ^[A-Za-z0-9._-]+$ ]] || { echo "omarchy-install-unattended: DISK must name a device under /dev" >&2; exit 2; }
@@ -45,7 +43,7 @@ export OMARCHY_INSTALL_LOG_FILE=$log OMARCHY_UI_INTERACTIVE=no
 cd /root
 rm -f user_configuration.json user_credentials.json user_encrypt_installation.txt authorized_keys tailscale_authkey defer-provisioning
 printf '%s\n' "$passphrase" |
-  OMARCHY_SERVER_HOSTNAME=$server_hostname OMARCHY_SERVER_USERNAME=$USERNAME \
+  OMARCHY_SERVER_HOSTNAME=$SERVER_HOSTNAME OMARCHY_SERVER_USERNAME=$USERNAME \
   OMARCHY_SERVER_KEYS=$AUTHORIZED_KEY OMARCHY_SERVER_DISK=/dev/$DISK OMARCHY_SERVER_ENCRYPT=$ENCRYPT \
   ./configurator --unattended
 unset passphrase

@@ -430,7 +430,7 @@ The login waits for the passphrase prompt and answers it, then the boot carries 
 
 `./bin/omarchy-iso-netboot release/omarchy-server-*.iso <dir>` writes `vmlinuz`, `initrd.img`, `arch` and `cmdline` for a launcher that boots the installer with kexec. `initrd.img` is the ISO's initramfs with the install media appended under `/omarchy-netboot`; the `omarchy_netboot` hook moves it to a tmpfs and archiso boots from it as from a stick. The machine needs about twice `initrd.img`'s size in free RAM.
 
-A launcher appends `/omarchy-launch` to the initrd. The hook moves it to `/run/omarchy-launch`. `omarchy-launch.service` then installs its SSH host key and `authorized_keys` for root, keys only, before sshd starts, and `omarchy-launch-watchdog.service` runs its `agent watchdog`. The console then asks nothing. `omarchy-install-unattended` installs from the launcher's `DISK`, `HOSTNAME`, `USERNAME`, `AUTHORIZED_KEY` and `ENCRYPT`, with the passphrase on stdin. It copies the installed system's host public keys to `HOST_KEYS_OUT` and carries `TAILSCALE_STATE_DIR` over to `/var/lib/tailscale`.
+A launcher appends `/omarchy-launch` to the initrd. The hook moves it to `/run/omarchy-launch`. `omarchy-launch.service` then installs its SSH host key and `authorized_keys` for root, keys only, before sshd starts, and `omarchy-launch-watchdog.service` runs its `agent watchdog`. The console then asks nothing. `omarchy-install-unattended` installs from the launcher's `DISK`, `SERVER_HOSTNAME`, `USERNAME`, `AUTHORIZED_KEY` and `ENCRYPT`, with the passphrase on stdin. It copies the installed system's host public keys to `HOST_KEYS_OUT`, carries `TAILSCALE_STATE_DIR` over to `/var/lib/tailscale`, and does not reboot: the launcher's agent does.
 
 ### Unattended installs
 
