@@ -29,6 +29,8 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 bsdtar -xf "$iso" -C "$work" arch
+# The ISO's read-only modes would block moving the media below.
+chmod -R u+w "$work"
 [[ -d $work/arch/x86_64 ]] && arch=x86_64
 [[ -d $work/arch/aarch64 ]] && arch=aarch64
 [[ -n ${arch:-} ]] || { echo "Error: $iso has no arch/x86_64 or arch/aarch64" >&2; exit 1; }
