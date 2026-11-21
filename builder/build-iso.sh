@@ -401,6 +401,9 @@ else
   # linux-t2 is the live kernel on a Mac (configs/grub/grub.cfg).
   arch_packages=("$OMARCHY_KERNEL" linux-t2 git gum jq openssl plymouth ttfx terminus-font tzupdate omarchy-keyring "$OMARCHY_SETTINGS_PACKAGE" lvm2 cryptsetup parted)
 fi
+# A Server's live system runs the launcher's Tailscale step (tailscaled in
+# userspace networking, then tailscale up), which also needs CA certificates.
+[[ ${OMARCHY_SERVER_INSTALL:-} != "1" ]] || arch_packages+=(tailscale ca-certificates)
 live_packages_file="$build_cache_dir/packages.$OMARCHY_ARCH"
 printf '%s\n' "${arch_packages[@]}" >> "$live_packages_file"
 
