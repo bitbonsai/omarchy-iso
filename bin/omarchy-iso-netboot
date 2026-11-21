@@ -25,11 +25,21 @@ for tool in bsdtar cpio zstd; do
   command -v "$tool" >/dev/null || { echo "Error: $tool is needed" >&2; exit 1; }
 done
 
-work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+# The ISO's media is several GB: extract beside the output, on its disk, not in
+# /tmp, which is often a small tmpfs. The ISO's read-only modes would block
+# both the moves below and the cleanup, so the tree is made writable for both.
+mkdir -p "$out"
+work=$(mktemp -d "$(dirname "$(realpath "$out")")/.omarchy-netboot.XXXXXX")
+cleanup() {
+  chmod -R u+w "$work" 2>/dev/null || true
+  rm -rf "$work"
+}
+trap cleanup EXIT
 
-bsdtar -xf "$iso" -C "$work" arch
-# The ISO's read-only modes would block moving the media below.
+if ! bsdtar -xf "$iso" -C "$work" arch; then
+  echo "Error: could not extract $iso into $work" >&2
+  exit 1
+fi
 chmod -R u+w "$work"
 [[ -d $work/arch/x86_64 ]] && arch=x86_64
 [[ -d $work/arch/aarch64 ]] && arch=aarch64
@@ -46,14 +56,20 @@ media=$work/omarchy-netboot
 mkdir -p "$media/arch"
 mv "$work/arch/$arch" "$media/arch/$arch"
 
-mkdir -p "$out"
-cp "$kernel" "$out/vmlinuz"
+# Written in the work directory and moved into place last, so a failed run
+# leaves the previous image whole.
+new=$work/out
+mkdir "$new"
+cp "$kernel" "$new/vmlinuz"
 {
   cat "$initramfs"
   (cd "$work" && find omarchy-netboot | LC_ALL=C sort | cpio --quiet -o -H newc -R 0:0) | zstd -q -T0 -3
-} >"$out/initrd.img"
-echo "$arch" >"$out/arch"
+} >"$new/initrd.img"
+echo "$arch" >"$new/arch"
 # initramfs_options sizes the RAM filesystem the initrd unpacks into.
-echo "archisobasedir=arch copytoram=n initramfs_options=size=90% initramfs_async=0" >"$out/cmdline"
+echo "archisobasedir=arch copytoram=n initramfs_options=size=90% initramfs_async=0" >"$new/cmdline"
+for file in vmlinuz initrd.img arch cmdline; do
+  mv -f "$new/$file" "$out/$file"
+done
 
 echo "Netboot image in $out: initrd.img is $(du -h "$out/initrd.img" | cut -f1); boot it with about twice that in free RAM."
