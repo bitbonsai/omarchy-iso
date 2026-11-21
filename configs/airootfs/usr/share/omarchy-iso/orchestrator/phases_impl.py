@@ -2429,6 +2429,10 @@ def _run_target_setup_command(ctx: InstallContext, cmd: list[str], *, user: str 
     ]
     if _install_debug_enabled():
         env_extras.append("OMARCHY_INSTALL_DEBUG=1")
+    if ctx.server:
+        # On the desktop the omarchy-* commands are in /usr/bin; a server has
+        # them only in its checkout.
+        env_extras.append(f"PATH={omarchy_path}/bin:/usr/local/sbin:/usr/local/bin:/usr/bin")
         _debug_log(ctx, "running target setup command: " + " ".join(cmd))
 
     # A private mount namespace keeps this arch-chroot's /proc, /sys and /dev

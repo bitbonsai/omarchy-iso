@@ -506,6 +506,9 @@ image_server_packages=()
 if [[ ${OMARCHY_SERVER_INSTALL:-} == "1" ]]; then
   omarchy_packages=("$OMARCHY_SETTINGS_PACKAGE" "$OMARCHY_NVIM_PACKAGE")
   image_server_packages=(dropbear tpm2-tss)
+  # The boot stack the omarchy package depends on, which a server does not
+  # install; aarch64 adds the same in image_arch_packages.
+  [[ $OMARCHY_ARCH != x86_64 ]] || image_server_packages+=(limine-mkinitcpio-hook limine-snapper-sync snapper)
   server_list="$(dirname "${base_pkg_lists[0]}")/omarchy-server.packages"
   if [[ ! -f $server_list ]]; then
     echo "ERROR: the Omarchy runtime ships no install/omarchy-server.packages; a Server ISO needs it" >&2
