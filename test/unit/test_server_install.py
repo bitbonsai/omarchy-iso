@@ -165,7 +165,9 @@ class LinkCheckoutTest(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
         source = root / "source"
-        git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+        # The host's own git config may sign commits and tags.
+        git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+               "-c", "commit.gpgSign=false", "-c", "tag.gpgSign=false"]
         subprocess.run([*git, "init", "-q", "-b", "server", str(source)], check=True)
         (source / "bin").mkdir()
         (source / "bin" / "omarchy-version").write_text("#!/bin/sh\n")
