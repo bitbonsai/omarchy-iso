@@ -1221,10 +1221,19 @@ if ! expected_packages="$(resolve_expected_packages)"; then
   echo "       pacstrap would fail the same way." >&2
   exit 1
 fi
-if (( expected_packages < 600 || expected_packages > 2000 )); then
+# The desktop resolves to 600-2000 packages. A server has no compositor,
+# shell, apps, audio or fonts: its list's last build resolved to 417, so it
+# gets a range of its own, still strict both ways. Below 300 the image is
+# short; 600 and up means the desktop came back in through a dependency.
+expected_min=600 expected_max=2000
+if [[ ${OMARCHY_SERVER_INSTALL:-} == "1" ]]; then
+  expected_min=300 expected_max=599
+fi
+if (( expected_packages < expected_min || expected_packages > expected_max )); then
   echo "ERROR: resolved target package count $expected_packages is outside the" >&2
-  echo "       expected 600-2000 range. The count is the image's package count" >&2
-  echo "       plus the kernel closure, so this means the root image is short." >&2
+  echo "       expected $expected_min-$expected_max range. The count is the image's package count" >&2
+  echo "       plus the kernel closure, so this means the root image is short or, on a" >&2
+  echo "       server, that the desktop came back in." >&2
   exit 1
 fi
 printf '%s\n' "$expected_packages" \
