@@ -522,6 +522,10 @@ drop_server_excludes() {
   fi
 }
 if [[ ${OMARCHY_SERVER_INSTALL:-} == "1" ]]; then
+  # The live root is pacstrapped from the same offline mirror, so drop
+  # server-excluded releng packages (such as sof-firmware) from it too.
+  drop_server_excludes < "$live_packages_file" > "$live_packages_file.tmp" &&
+    mv "$live_packages_file.tmp" "$live_packages_file"
   omarchy_packages=("$OMARCHY_SETTINGS_PACKAGE" "$OMARCHY_NVIM_PACKAGE")
   image_server_packages=(dropbear tpm2-tss)
   # The boot stack the omarchy package depends on, which a server does not

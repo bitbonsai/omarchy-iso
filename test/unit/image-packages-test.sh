@@ -14,12 +14,21 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 # The selection alone, not the rest of the build, reading this checkout's
-# lists where the builder container mounts them at /builder.
+# lists where the builder container mounts them at /builder. image_package_list
+# pipes through drop_server_excludes, so that helper and its package list come
+# out with it.
 {
   grep '^per_machine_packages=' "$ROOT/builder/build-iso.sh"
+  awk '
+    /^server_excluded_packages=/ {keep=1}
+    keep {print}
+    /^drop_server_excludes\(\)/ {fn=1}
+    fn && /^\}$/ {exit}
+  ' "$ROOT/builder/build-iso.sh"
   awk '/^image_package_list\(\) \{$/,/^\}$/' "$ROOT/builder/build-iso.sh"
 } | sed "s#/builder/#$ROOT/builder/#g" >"$work/fn.sh"
 grep -q '^image_package_list() {' "$work/fn.sh" || { echo "image_package_list not found in builder/build-iso.sh"; exit 1; }
+grep -q '^drop_server_excludes() {' "$work/fn.sh" || { echo "drop_server_excludes not found in builder/build-iso.sh"; exit 1; }
 source "$work/fn.sh"
 
 archinstall_packages_file=$ROOT/builder/archinstall.packages
