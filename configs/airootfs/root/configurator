@@ -1330,7 +1330,9 @@ elif $server; then
       greeter
     done
   fi
-  language_form
+  # Server defaults to English without the 40-language desktop picker.
+  i18n_load "$language"
+  set_form_language
   keyboard_form
   server_account_step
   server_disk_step
