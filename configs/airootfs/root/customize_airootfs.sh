@@ -32,12 +32,12 @@ fi
 # The live system installs from the stick and never joins a network on its
 # own: the configurator has no Wi-Fi step, and the one network call it makes
 # (tzupdate, for a timezone guess) only works over a cable that is already
-# plugged in. So firmware for radios, datacenter NICs, cameras and ARM SoCs is
-# 330 MB of ISO that no driver in this system can ask for. What stays is
-# everything a machine may need to show the installer and speak it: GPU
-# firmware (a GPU driver that fails for want of firmware has already taken the
-# screen from the firmware framebuffer, and nouveau needs nvidia/ for GSP),
-# audio (the accessibility entry speaks), microcode, and wired NICs.
+# plugged in. So firmware for radios, cameras and ARM SoCs is 330 MB of ISO
+# that no driver in this system can ask for. What stays is everything a machine
+# may need to show the installer and speak it: GPU firmware (a GPU driver that
+# fails for want of firmware has already taken the screen from the firmware
+# framebuffer, and nouveau needs nvidia/ for GSP), audio (the accessibility
+# entry speaks), microcode, and wired NICs.
 # qcom/ goes too, Adreno's included: msm keeps the display without it and
 # loads the GPU's microcode only when the DRM device is first opened
 # (msm_open -> load_gpu in drivers/gpu/drm/msm/msm_drv.c), which the installer,
@@ -45,6 +45,12 @@ fi
 # before the medium appears is in its UKI's own initramfs, which build-iso.sh
 # has this script build before it gets here.
 # The installed system gets its firmware from the root image, not from here.
+#
+# A Server ISO inverts the priority: it installs headless and silent over SSH,
+# so GPU and audio firmware is dead weight and the datacenter NICs (which a
+# server may well have) stay.
+server_install=0
+[[ ! -f /usr/share/omarchy-iso/server-install ]] || server_install=1
 fw=/usr/lib/firmware
 if [[ -d $fw ]]; then
   before=$(du -sm "$fw" | cut -f1)
@@ -53,12 +59,19 @@ if [[ -d $fw ]]; then
     "$fw"/rtw88 "$fw"/rtw89 "$fw"/rtlwifi "$fw"/rtl_bt "$fw"/ti-connectivity "$fw"/qca \
     "$fw"/nxp "$fw"/libertas "$fw"/mwl8k "$fw"/mwlwifi "$fw"/airoha "$fw"/qcom \
     "$fw"/wfx "$fw"/rsi "$fw"/mt76* "$fw"/mt79* \
-    "$fw"/dpaa2 "$fw"/cxgb3 "$fw"/cxgb4 "$fw"/mellanox "$fw"/netronome "$fw"/liquidio \
-    "$fw"/qed "$fw"/cavium "$fw"/intel/ice \
     "$fw"/dvb-* "$fw"/v4l-* "$fw"/intel/ipu* "$fw"/intel/vsc "$fw"/intel/irci* \
     "$fw"/imx "$fw"/meson "$fw"/rockchip "$fw"/arm "$fw"/powervr "$fw"/nvidia/tegra* \
     "$fw"/amlogic "$fw"/cnm "$fw"/cadence "$fw"/ti-keystone "$fw"/microchip
-  echo "Live firmware: ${before} MB -> $(du -sm "$fw" | cut -f1) MB (no radio, datacenter NIC, camera or SoC firmware)."
+  if (( server_install )); then
+    # nvidia/ is a directory of GPUs on a server too; only its tegra/ went above.
+    rm -rf "$fw"/nvidia "$fw"/amdgpu "$fw"/radeon "$fw"/i915 "$fw"/xe \
+      "$fw"/intel/avs "$fw"/intel/sst "$fw"/intel/sof* "$fw"/sof "$fw"/cirrus "$fw"/essx8336
+    echo "Server firmware: ${before} MB -> $(du -sm "$fw" | cut -f1) MB (no desktop GPU or audio firmware; datacenter NIC firmware kept)."
+  else
+    rm -rf "$fw"/dpaa2 "$fw"/cxgb3 "$fw"/cxgb4 "$fw"/mellanox "$fw"/netronome "$fw"/liquidio \
+      "$fw"/qed "$fw"/cavium "$fw"/intel/ice
+    echo "Live firmware: ${before} MB -> $(du -sm "$fw" | cut -f1) MB (no radio, datacenter NIC, camera or SoC firmware)."
+  fi
 fi
 
 # Nobody reads documentation or compiles against headers in the installer, and
@@ -77,8 +90,10 @@ while IFS= read -r filename; do
 done <"$shipped_list"
 
 if (( ${#shipped[@]} == 0 )); then
-  echo "ERROR: refusing to prune the shipped mirror with an empty selection" >&2
-  exit 1
+  # A Server ISO ships no package beyond the image (build-iso.sh allows it),
+  # so the whole mirror goes; anything else is a broken selection.
+  (( server_install )) || { echo "ERROR: refusing to prune the shipped mirror with an empty selection" >&2; exit 1; }
+  echo "No package files beyond the root image: pruning the whole mirror."
 fi
 for filename in "${!shipped[@]}"; do
   if [[ ! -f $mirror/$filename ]]; then

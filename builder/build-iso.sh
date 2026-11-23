@@ -225,9 +225,12 @@ echo "$OMARCHY_ISO_REF" > "$build_cache_dir/airootfs/root/omarchy_iso_ref"
 echo "$OMARCHY_ARCH" > "$build_cache_dir/airootfs/root/omarchy_arch"
 if [[ ${OMARCHY_SERVER_INSTALL:-} == "1" ]]; then
   touch "$build_cache_dir/airootfs/usr/share/omarchy-iso/server-install"
-  # The checkout the installed server runs Omarchy from (omarchy-iso-make).
-  install -d "$build_cache_dir/airootfs/usr/share/omarchy-iso/server/checkout"
-  cp /server-checkout/omarchy.bundle /server-checkout/checkout.env "$build_cache_dir/airootfs/usr/share/omarchy-iso/server/checkout/"
+  # The checkout the installed server runs Omarchy from (omarchy-iso-make): a
+  # depth-1 bare clone, staged again on the target and cloned from there.
+  server_checkout_dir="$build_cache_dir/airootfs/usr/share/omarchy-iso/server/checkout"
+  rm -rf "$server_checkout_dir"
+  install -d "$server_checkout_dir"
+  cp -a /server-checkout/omarchy.git /server-checkout/checkout.env "$server_checkout_dir/"
 fi
 if [[ ${OMARCHY_OEM_INSTALL:-} == "1" ]]; then
   touch "$build_cache_dir/airootfs/usr/share/omarchy-iso/oem-install"
@@ -506,6 +509,18 @@ fi
 # neither in the image nor in the mirror.
 omarchy_packages=("$OMARCHY_RUNTIME_PACKAGE" "$OMARCHY_SETTINGS_PACKAGE" "$OMARCHY_NVIM_PACKAGE")
 image_server_packages=()
+# What a Server ISO never carries: PipeWire is archinstall's desktop audio
+# selection and alsa/sof-firmware only desktop sound hardware. Both stay out of
+# the image, the mirror and the shipped lists.
+server_excluded_packages=(pipewire pipewire-alsa pipewire-jack pipewire-pulse \
+  gst-plugin-pipewire libpulse wireplumber alsa-firmware sof-firmware)
+drop_server_excludes() {
+  if [[ ${OMARCHY_SERVER_INSTALL:-} == "1" ]]; then
+    grep -Fxv -f <(printf '%s\n' "${server_excluded_packages[@]}") || true
+  else
+    cat
+  fi
+}
 if [[ ${OMARCHY_SERVER_INSTALL:-} == "1" ]]; then
   omarchy_packages=("$OMARCHY_SETTINGS_PACKAGE" "$OMARCHY_NVIM_PACKAGE")
   image_server_packages=(dropbear tpm2-tss)
@@ -518,6 +533,10 @@ if [[ ${OMARCHY_SERVER_INSTALL:-} == "1" ]]; then
     exit 1
   fi
   base_pkg_lists[0]=$server_list
+  # No desktop package list: a server installs the Server list and the image,
+  # never omarchy-other.packages.
+  : > /tmp/omarchy-other-server.packages
+  base_pkg_lists[1]=/tmp/omarchy-other-server.packages
 fi
 
 # aarch64 takes the runtime's own default sets, as omarchy-pkg-defaults composes
@@ -669,7 +688,7 @@ mapfile -t all_packages < <(
     # Always include the selected Omarchy packages so the target install can
     # find the runtime and companion packages in the offline mirror.
     printf '%s\n' "${omarchy_packages[@]}"
-  } | sort -u
+  } | drop_server_excludes | sort -u
 )
 
 # Arch dropped the prebuilt broadcom-wl on 2026-09-02 and rebuilt broadcom-wl-dkms
@@ -700,7 +719,7 @@ mapfile -t target_packages < <(
     grep -hv '^#\|^$' /builder/image.packages
     ((${#image_server_packages[@]} == 0)) || printf '%s\n' "${image_server_packages[@]}"
     printf '%s\n' "${omarchy_packages[@]}"
-  } | sed 's/^broadcom-wl$/broadcom-wl-dkms/' | sort -u
+  } | drop_server_excludes | sed 's/^broadcom-wl$/broadcom-wl-dkms/' | sort -u
 )
 
 # x86_64: Omarchy's optional list also names packages for aarch64 boards,
@@ -806,13 +825,13 @@ if [[ ${OMARCHY_SERVER_INSTALL:-} == "1" ]]; then
     settings_source=v$settings_source
   fi
   source /server-checkout/checkout.env
-  rm -rf /tmp/server-checkout && git clone -q --branch "$BRANCH" /server-checkout/omarchy.bundle /tmp/server-checkout
-  if ! git -C /tmp/server-checkout merge-base --is-ancestor "$settings_source" HEAD 2>/dev/null; then
+  # Asked of the read-only source mount, not the shipped clone: the ISO carries
+  # only a depth-1 history, which cannot answer a merge-base.
+  if ! git -c safe.directory=/omarchy-source -C /omarchy-source merge-base --is-ancestor "$settings_source" HEAD 2>/dev/null; then
     echo "ERROR: branch $BRANCH does not contain $settings_source, which the channel's $OMARCHY_SETTINGS_PACKAGE $settings_version is built from" >&2
     exit 1
   fi
   echo "Server: $BRANCH contains $settings_source, matching $OMARCHY_SETTINGS_PACKAGE $settings_version"
-  rm -rf /tmp/server-checkout
 fi
 # aarch64: every Snapdragon OEM firmware package, found by the
 # qcom-firmware-<folder> name it provides. Omarchy installs a machine's
@@ -995,7 +1014,7 @@ image_package_list() {
     # The shipped copy, which is what the install reads too.
     grep -hv '^#\|^$' "$build_cache_dir/airootfs/usr/share/omarchy-iso/omarchy-base.packages"
     printf '%s\n' "${omarchy_packages[@]}"
-  } | sort -u
+  } | drop_server_excludes | sort -u
 }
 mapfile -t image_packages < <(image_package_list)
 
@@ -1140,7 +1159,9 @@ awk -F'\t' '
 # grep -c exits 1 on no match; the count check below wants the 0.
 shipped_count=$(grep -c . "$shipped_list" || true)
 mirror_count=$(mirror_package_index | wc -l)
-if (( shipped_count == 0 || shipped_count >= mirror_count )); then
+# A Server ISO can legitimately ship nothing beyond the image, once the desktop
+# lists and firmware are out; every other ISO must ship something.
+if (( shipped_count >= mirror_count || (shipped_count == 0 && ${OMARCHY_SERVER_INSTALL:-0} != 1) )); then
   echo "ERROR: the shipped-mirror selection looks wrong: $shipped_count of $mirror_count packages" >&2
   exit 1
 fi

@@ -174,11 +174,14 @@ if [[ ${OMARCHY_SERVER_INSTALL:-} == "1" ]]; then
     { echo "Error: branch $server_branch has no upstream to follow; set one with git branch -u" >&2; exit 1; }
   [[ -z $(git -C "$SERVER_CHECKOUT" status --porcelain) ]] ||
     { echo "Error: $SERVER_CHECKOUT has uncommitted changes; the server would not get them" >&2; exit 1; }
-  # The branch and its release tags, which the build checks against the
-  # channel's omarchy-settings.
+  # A depth-1 bare clone of the branch, which the installed server clones again
+  # and `omarchy update` fast-forwards: enough history for that, and the tags
+  # only shipped so the build's settings check could clone the bundle, now done
+  # against the read-only /omarchy-source mount (a bundle cannot be shallow).
   SERVER_CHECKOUT_DIR=$(mktemp -d)
   trap 'rm -rf "$SERVER_CHECKOUT_DIR"' EXIT
-  git -C "$SERVER_CHECKOUT" bundle create -q "$SERVER_CHECKOUT_DIR/omarchy.bundle" --tags "$server_branch"
+  git clone --quiet --depth 1 --no-local --bare --branch "$server_branch" \
+    "$SERVER_CHECKOUT" "$SERVER_CHECKOUT_DIR/omarchy.git"
   printf 'BRANCH=%s\nURL=%s\n' "$server_branch" "$server_url" >"$SERVER_CHECKOUT_DIR/checkout.env"
   echo "Server: Omarchy from $server_branch of $server_url ($(git -C "$SERVER_CHECKOUT" rev-parse --short HEAD))"
 fi

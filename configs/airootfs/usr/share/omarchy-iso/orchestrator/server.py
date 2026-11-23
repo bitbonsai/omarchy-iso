@@ -23,11 +23,15 @@ UNLOCK_UNIT = Path("etc/systemd/system/omarchy-ssh-unlock.service")
 UNLOCK_NETWORK_UNIT = Path("etc/systemd/system/omarchy-ssh-unlock-network.service")
 UNLOCK_DROPIN = Path("etc/mkinitcpio.conf.d/zz-omarchy-ssh-unlock.conf")
 TPM_VERSION = Path("/sys/class/tpm/tpm0/tpm_version_major")
+# The launcher kexecs this installer from the machine's old boot, so a TPM slot
+# enrolled here binds that boot's PCR 7 and never unlocks; the launcher enrolls
+# again after the first SSH unlock (briefs/status/launcher.md).
+LAUNCH_MARKER = Path("/run/omarchy-launch")
 
 # The Omarchy code a server runs: a git checkout on Omarchy's dev channel, which
-# omarchy update fast-forwards. The ISO carries it as a bundle, with the branch
-# and the remote it tracks in checkout.env (omarchy-iso-make --server).
-CHECKOUT_BUNDLE = SERVER_FILES / "checkout" / "omarchy.bundle"
+# omarchy update fast-forwards. The ISO carries it as a depth-1 bare clone, with
+# the branch and the remote it tracks in checkout.env (omarchy-iso-make --server).
+CHECKOUT_REPO = SERVER_FILES / "checkout" / "omarchy.git"
 CHECKOUT_ENV = SERVER_FILES / "checkout" / "checkout.env"
 SYSTEM_SECURE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/bin"
 
@@ -72,18 +76,20 @@ def link_checkout(ctx: InstallContext) -> None:
     env = _checkout_env(CHECKOUT_ENV)
 
     info(f"› cloning the Omarchy checkout ({env['BRANCH']}, tracking {env['URL']}) to {checkout}")
-    staged = target / "var" / "tmp" / "omarchy.bundle"
-    shutil.copy2(CHECKOUT_BUNDLE, staged)
-    staged.chmod(0o644)
+    staged = target / "var" / "tmp" / "omarchy.git"
+    shutil.copytree(CHECKOUT_REPO, staged)
     try:
         user = ["arch-chroot", "-u", username, str(target)]
-        subprocess.run([*user, "git", "clone", "--quiet", "--branch", env["BRANCH"],
-                        "/var/tmp/omarchy.bundle", str(checkout)], check=True)
-        # origin/<branch> stays from the bundle, so the branch keeps tracking
+        # One commit in and out: the installed server clones it again and
+        # omarchy update fast-forwards from there. file:// keeps the clone off
+        # git's local-transport hardlinks, which cannot cross the chroot.
+        subprocess.run([*user, "git", "clone", "--quiet", "--depth", "1", "--no-local",
+                        "--branch", env["BRANCH"], "file:///var/tmp/omarchy.git", str(checkout)], check=True)
+        # origin/<branch> stays from the clone, so the branch keeps tracking
         # it; the next fetch, omarchy update's, goes to the fork.
         subprocess.run([*user, "git", "-C", str(checkout), "remote", "set-url", "origin", env["URL"]], check=True)
     finally:
-        staged.unlink(missing_ok=True)
+        shutil.rmtree(staged, ignore_errors=True)
 
     conf = target / "etc" / "omarchy.conf"
     conf.write_text(f'export OMARCHY_PATH="{checkout}"\n')
@@ -211,11 +217,14 @@ def _luks_device(target: Path) -> str:
     raise RuntimeError(f"cryptsetup status {source} names no device")
 
 
-def enroll_tpm(ctx: InstallContext) -> None:
+def enroll_tpm(ctx: InstallContext, launch_marker: Path = LAUNCH_MARKER) -> None:
     """Bind a TPM2 key slot to PCR 7 (the Secure Boot state), which the
     installed system measures the same as this live boot. A failure leaves
     the passphrase as the only way in, which SSH unlock covers, so it is
     logged and the install goes on."""
+    if launch_marker.exists():
+        info("› launched install: the TPM is enrolled after the first SSH unlock, not here")
+        return
     if not has_tpm2():
         info("› no TPM 2.0: the disk unlocks with the passphrase over SSH")
         return

@@ -149,6 +149,16 @@ class ServerPhasesTest(unittest.TestCase):
         self.assertFalse(any(cmd[0] == "systemd-cryptenroll" for cmd in self.calls))
         self.assertTrue(server.initramfs_has_ssh_unlock(self.target))
 
+    def test_a_launched_install_skips_the_tpm_enrollment(self):
+        # Enrolled from the kexec'd boot it would bind the old boot's PCR 7.
+        launched = Path(self.tmp.name) / "omarchy-launch"
+        launched.touch()
+        with mock.patch("subprocess.run", side_effect=self.fake_run), \
+                mock.patch.object(server, "has_tpm2", return_value=True):
+            server.enroll_tpm(self.ctx, launch_marker=launched)
+        self.assertEqual(self.calls, [])
+        self.assertFalse(list(Path(self.tmp.name).glob("tpm-enroll.key")))
+
     def test_an_unencrypted_server_gets_no_unlock(self):
         self.ctx.encrypt = False
         with mock.patch("subprocess.run", side_effect=self.fake_run):
@@ -171,8 +181,9 @@ class ServerPhasesTest(unittest.TestCase):
 
 
 class LinkCheckoutTest(unittest.TestCase):
-    """link_checkout clones the ISO's bundle with real git; arch-chroot is
-    replaced by running the command with its paths under the target."""
+    """link_checkout clones the ISO's depth-1 bare repo with real git;
+    arch-chroot is replaced by running the command with its paths under the
+    target."""
 
     def setUp(self):
         import subprocess
@@ -191,10 +202,10 @@ class LinkCheckoutTest(unittest.TestCase):
         subprocess.run([*git, "-C", str(source), "tag", "v4.5.0"], check=True)
         files = root / "iso" / "checkout"
         files.mkdir(parents=True)
-        subprocess.run(["git", "-C", str(source), "bundle", "create", "-q", str(files / "omarchy.bundle"),
-                        "--tags", "server"], check=True)
+        subprocess.run([*git, "clone", "--quiet", "--depth", "1", "--no-local", "--bare",
+                        "--branch", "server", str(source), str(files / "omarchy.git")], check=True)
         (files / "checkout.env").write_text("BRANCH=server\nURL=https://github.com/example/omarchy.git\n")
-        for name, value in (("CHECKOUT_BUNDLE", files / "omarchy.bundle"), ("CHECKOUT_ENV", files / "checkout.env")):
+        for name, value in (("CHECKOUT_REPO", files / "omarchy.git"), ("CHECKOUT_ENV", files / "checkout.env")):
             patcher = mock.patch.object(server, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -212,8 +223,16 @@ class LinkCheckoutTest(unittest.TestCase):
         if "visudo" in cmd:
             return CompletedProcess(cmd, 0, "", "")
         inner = cmd[4:] if cmd[1] == "-u" else cmd[2:]
-        inner = [str(self.target) + arg if arg.startswith(("/home/", "/var/tmp/")) else arg for arg in inner]
+        inner = [self.remap(arg) for arg in inner]
         return self.real_run(inner, **kwargs)
+
+    def remap(self, arg):
+        for prefix in ("/home/", "/var/tmp/"):
+            if arg.startswith(prefix):
+                return str(self.target) + arg
+            if arg.startswith("file://" + prefix):
+                return "file://" + str(self.target) + arg[len("file://"):]
+        return arg
 
     def test_the_checkout_is_cloned_tracks_the_fork_and_is_linked(self):
         import subprocess
@@ -230,7 +249,9 @@ class LinkCheckoutTest(unittest.TestCase):
         self.assertEqual((self.target / "etc/omarchy.conf").read_text(), 'export OMARCHY_PATH="/home/owner/omarchy"\n')
         self.assertEqual((self.target / "etc/sudoers.d/omarchy-dev-path").read_text(),
                          'Defaults secure_path="/home/owner/omarchy/bin:/usr/local/sbin:/usr/local/bin:/usr/bin"\n')
-        self.assertFalse((self.target / "var/tmp/omarchy.bundle").exists())
+        self.assertFalse((self.target / "var/tmp/omarchy.git").exists())
+        # The clone carries one commit, not the source's history.
+        self.assertEqual(git("rev-list", "--count", "HEAD"), "1")
 
     def test_the_desktop_keeps_the_package_tree(self):
         self.ctx.server = False
