@@ -1333,7 +1333,11 @@ elif $server; then
   # Server defaults to English without the 40-language desktop picker.
   i18n_load "$language"
   set_form_language
-  keyboard_form
+  if [[ -n ${SSH_CONNECTION:-} ]]; then
+    keyboard="us"
+  else
+    keyboard_form
+  fi
   server_account_step
   server_disk_step
   install_target="full_disk"
