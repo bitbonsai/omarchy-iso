@@ -458,9 +458,27 @@ centered_top_row() {
   printf '%d' "$(( top + 1 ))"
 }
 
+render_server_status_bar() {
+  [[ -f /usr/share/omarchy-iso/server-install || ${OMARCHY_ISO_EDITION:-} == server ]] || return 0
+  local rows cols
+  rows=$(stty size <"$TTY_PATH" 2>/dev/null | awk '{print $1}')
+  cols=$(stty size <"$TTY_PATH" 2>/dev/null | awk '{print $2}')
+  [[ $rows =~ ^[0-9]+$ ]] || rows=24
+  [[ $cols =~ ^[0-9]+$ ]] || cols=80
+
+  printf '%s%d;1H' "$CSI" "$rows"
+  if [[ ${TERM:-} == linux || ${OMARCHY_ASCII:-0} == 1 ]]; then
+    printf '\033[48;5;234m%*s\033[%d;2H\033[48;5;179;38;5;16;1m install \033[0m' "$cols" "" "$rows"
+  else
+    printf '\033[48;2;19;20;28m%*s\033[%d;2H\033[38;2;224;175;104;48;2;19;20;28m\033[48;2;224;175;104;38;2;21;22;30;1m󰒋 install\033[22;38;2;224;175;104;48;2;19;20;28m\033[0m' \
+      "$cols" "" "$rows"
+  fi
+}
+
 render_static() {
   progress_icon_layout "$TTY_PATH" "$CONTENT_WIDTH"
   progress_icon_static
+  render_server_status_bar
 }
 
 update_progress() {
@@ -477,6 +495,7 @@ update_progress() {
 
 render_dynamic() {
   progress_icon_frame "$LAST_PM" "" "$(t progress.tipLine "$(current_tip)")"
+  render_server_status_bar
 }
 
 install_duration() {
