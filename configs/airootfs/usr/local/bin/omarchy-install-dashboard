@@ -72,26 +72,43 @@ export GUM_CONFIRM_UNSELECTED_BACKGROUND="${GUM_CONFIRM_UNSELECTED_BACKGROUND:-0
 child_pid=""
 child_pgid=""
 
-tips=(
-  progress.tip.menu
-  progress.tip.keybindings
-  progress.tip.superKey
-  progress.tip.signPdfs
-  progress.tip.localSend
-  progress.tip.webApps
-  progress.tip.terminal
-  progress.tip.media
-  progress.tip.ocr
-  progress.tip.screenshots
-  progress.tip.reminders
-  progress.tip.themes
-  progress.tip.transparentBar
-  progress.tip.windows
-  progress.tip.clipboard
-  progress.tip.workspaces
-  progress.tip.colorPicker
-  progress.tip.update
-)
+if [[ -f /usr/share/omarchy-iso/server-install || ${OMARCHY_ISO_EDITION:-} == server ]]; then
+  tips=(
+    progress.tip.serverMenu
+    progress.tip.serverStatus
+    progress.tip.serverTmux
+    progress.tip.serverTabs
+    progress.tip.serverAuth
+    progress.tip.serverFirewall
+    progress.tip.serverContainers
+    progress.tip.serverBackups
+    progress.tip.serverTailscale
+    progress.tip.serverAgents
+    progress.tip.serverFleet
+    progress.tip.serverUpdate
+  )
+else
+  tips=(
+    progress.tip.menu
+    progress.tip.keybindings
+    progress.tip.superKey
+    progress.tip.signPdfs
+    progress.tip.localSend
+    progress.tip.webApps
+    progress.tip.terminal
+    progress.tip.media
+    progress.tip.ocr
+    progress.tip.screenshots
+    progress.tip.reminders
+    progress.tip.themes
+    progress.tip.transparentBar
+    progress.tip.windows
+    progress.tip.clipboard
+    progress.tip.workspaces
+    progress.tip.colorPicker
+    progress.tip.update
+  )
+fi
 
 cleanup() {
   printf '%s%s' "$RESET" "$SHOW_CURSOR" >"$TTY_PATH" 2>/dev/null || true
