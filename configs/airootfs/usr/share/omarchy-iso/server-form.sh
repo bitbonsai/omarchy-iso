@@ -91,10 +91,24 @@ server_prompt_keys() {
   done
 }
 
+server_prompt_hostname() {
+  local status
+  while true; do
+    hostname=$(gum input --value "${hostname:-}" --placeholder "omarchy-server" \
+      --prompt.foreground="#845DF9" --prompt "Hostname> ") && status=0 || status=$?
+    ((status == 0)) || return $status
+    hostname=${hostname,,}
+    if [[ $hostname =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]; then
+      return 0
+    fi
+    notice "Hostname must use lowercase letters, digits, and hyphens." 1
+  done
+}
+
 server_account_form() {
   step "$(t server.accountIntro)"
   omarchy_prompt_timezone || return $?
-  omarchy_prompt_hostname || return $?
+  server_prompt_hostname || return $?
   omarchy_prompt_username || return $?
   server_prompt_keys || return $?
 }
