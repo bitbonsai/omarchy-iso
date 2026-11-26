@@ -590,6 +590,7 @@ render_finish() {
   else
     { printf '%s%d;1H' "$CSI" "$FINISH_TOP_ROW"; render_logo; } >"$TTY_PATH"
   fi
+  render_server_status_bar >"$TTY_PATH"
   printf '%s%s%d;1H' "$SHOW_CURSOR" "$CSI" "$((FINISH_TOP_ROW + LOGO_HEIGHT + 5))" >"$TTY_PATH"
 }
 
