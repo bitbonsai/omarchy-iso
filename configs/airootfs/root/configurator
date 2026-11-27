@@ -190,6 +190,8 @@ greeter() {
   # Two columns narrower than the console: ttfx centers its text two columns
   # right of plain centering, so a full-width canvas would sit the animated
   # logo a column off the gum-drawn one underneath it.
+  local accent=6
+  $server && accent=1
   ttfx -i "$LOGO_PATH" \
     --canvas-width "$((cols > 2 ? cols - 2 : cols))" \
     --anchor-text c \
@@ -197,7 +199,7 @@ greeter() {
     --reuse-canvas \
     --xterm-colors \
     colorshift \
-    --gradient-stops "$LOGO_COLOR" "$((LOGO_COLOR + 8))" 6 "$((LOGO_COLOR + 8))" \
+    --gradient-stops "$LOGO_COLOR" "$((LOGO_COLOR + 8))" "$accent" "$((LOGO_COLOR + 8))" \
     --gradient-frames 3 \
     --cycles 1000 \
     --final-gradient-stops "$LOGO_COLOR" \
