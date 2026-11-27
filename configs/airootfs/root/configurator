@@ -120,10 +120,43 @@ wait_for_stable_terminal() {
   done
 }
 
+# The blue install pill the dashboard keeps on the bottom row, drawn on every
+# Server setup screen too. gum clears to the end of the screen on each draw,
+# so a background loop repaints it, in one write that restores the cursor.
+server_install_pill() {
+  $server || return 0
+  local rows cols bar
+  read -r rows cols < <(stty size </dev/tty 2>/dev/null)
+  [[ $rows =~ ^[0-9]+$ ]] || rows=24
+  [[ $cols =~ ^[0-9]+$ ]] || cols=80
+  if [[ ${TERM:-} == linux || ${OMARCHY_ASCII:-0} == 1 ]]; then
+    printf -v bar '\033[48;5;234m%*s\033[%d;2H\033[48;5;75;38;5;16;1m install \033[0m' "$cols" "" "$rows"
+  else
+    printf -v bar '\033[48;2;19;20;28m%*s\033[%d;2H\033[38;2;122;162;247;48;2;19;20;28m\ue0b6\033[48;2;122;162;247;38;2;21;22;30;1m\U000f01da install\033[22;38;2;122;162;247;48;2;19;20;28m\ue0b4\033[0m' \
+      "$cols" "" "$rows"
+  fi
+  printf '\0337\033[%d;1H%s\0338' "$rows" "$bar" >/dev/tty
+}
+
+server_install_pill_start() {
+  $server || return 0
+  (while sleep 0.4; do server_install_pill; done) &
+  install_pill_pid=$!
+  trap server_install_pill_stop EXIT
+}
+
+server_install_pill_stop() {
+  [[ -n ${install_pill_pid:-} ]] || return 0
+  kill "$install_pill_pid" 2>/dev/null
+  wait "$install_pill_pid" 2>/dev/null
+  install_pill_pid=""
+}
+
 clear_logo() {
   measure_terminal
   printf "\033[H\033[2J"
   gum style --foreground "$LOGO_COLOR" --padding "1 0 0 $PADDING_LEFT" "$(<"$LOGO_PATH")"
+  server_install_pill
 }
 
 # Vertically-centered welcome shown once before the keyboard step — the same
@@ -164,6 +197,7 @@ greeter() {
   fi
   hpad=$(((cols - ${#hint}) / 2)); (( hpad < 0 )) && hpad=0
   printf '\033[%d;%dH\033[2m%s\033[0m' "$hint_row" "$((hpad + 1))" "$hint"
+  server_install_pill
 
   # Keys from a cidata drive already opened the live SSH door: say where it is.
   if $server && [[ -z ${SSH_CONNECTION:-} && -s $server_installer_keys ]]; then
@@ -1331,6 +1365,7 @@ elif $server; then
     server_ssh_handoff "$@"
     greeter
   done
+  server_install_pill_start
   # Server defaults to English without the 40-language desktop picker.
   i18n_load "$language"
   set_form_language
@@ -1343,6 +1378,7 @@ elif $server; then
   server_disk_step
   install_target="full_disk"
   server_claim_install "$@"
+  server_install_pill_stop
 elif ! $oem_install; then
   greeter
   language_form
