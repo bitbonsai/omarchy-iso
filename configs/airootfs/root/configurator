@@ -159,12 +159,14 @@ greeter() {
   printf '\033[%d;%dH%s' "$tagline_row" "$((tpad + 1))" "$tagline"
 
   hint="Press Return to Start Install"
-  $server && hint="$(t server.startHint)"
+  if $server && [[ -z ${SSH_CONNECTION:-} ]]; then
+    hint="$(t server.startHint)"
+  fi
   hpad=$(((cols - ${#hint}) / 2)); (( hpad < 0 )) && hpad=0
   printf '\033[%d;%dH\033[2m%s\033[0m' "$hint_row" "$((hpad + 1))" "$hint"
 
   # Keys from a cidata drive already opened the live SSH door: say where it is.
-  if $server && [[ -s $server_installer_keys ]]; then
+  if $server && [[ -z ${SSH_CONNECTION:-} && -s $server_installer_keys ]]; then
     printf '\033[%d;1H' "$((hint_row + 2))"
     server_ssh_lines
   fi
@@ -202,9 +204,9 @@ greeter() {
     </dev/null >/dev/tty 2>/dev/null &
   anim=$!
 
-  # Server: Return installs here, S finishes the install over SSH.
+  # Server: Return installs here; on a local console, S finishes over SSH.
   greeter_choice=here
-  if $server; then
+  if $server && [[ -z ${SSH_CONNECTION:-} ]]; then
     local key
     while IFS= read -rsn1 key </dev/tty; do
       [[ -z $key ]] && break
@@ -1322,14 +1324,11 @@ if $server && [[ ${1:-} == --unattended ]]; then
   server_answers_from_env
   install_target="full_disk"
 elif $server; then
-  # Over SSH there is no console to animate: straight to the questions.
-  if [[ -z ${SSH_CONNECTION:-} ]]; then
+  greeter
+  while [[ $greeter_choice == ssh ]]; do
+    server_ssh_handoff "$@"
     greeter
-    while [[ $greeter_choice == ssh ]]; do
-      server_ssh_handoff "$@"
-      greeter
-    done
-  fi
+  done
   # Server defaults to English without the 40-language desktop picker.
   i18n_load "$language"
   set_form_language
